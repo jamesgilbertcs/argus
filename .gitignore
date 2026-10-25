@@ -218,3 +218,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ARGUS-specific exclusions
+
+# Environment variables and credentials
+.env.*
+!.env.example
+
+# Local SQLite databases
+*.db
+*.sqlite3
