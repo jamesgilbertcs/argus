@@ -45,5 +45,20 @@ See [the synthetic environment documentation](docs/synthetic_environment.md) for
 schemas, relationships, scenarios, assumptions, and import guidance.
 [`evaluation/scenario_ground_truth.json`](evaluation/scenario_ground_truth.json)
 contains evaluation answers: keep it separate from the operational evidence supplied
-to a future investigator. No AI agent, LLM calls, Zetaris connectivity, orchestration,
-or frontend is implemented in this phase.
+to a future investigator. No AI agent, LLM calls, orchestration, or frontend is
+implemented.
+
+The read-only direct REST client is in `scripts/zetaris_client.py`. Configure
+`ZETARIS_REST_URL`, `ZETARIS_ORG_ID`, and `ZETARIS_API_KEY` in the existing
+Git-ignored `.env.local` (see `.env.example` for placeholders), then run:
+
+```sh
+python -m unittest discover -s tests -v
+python scripts/check_zetaris.py
+```
+
+The second command explicitly performs live, read-only integration checks against
+the existing `ARGUS_SECURITY.*_compat_test` tables. Normal tests mock HTTP and
+require no live instance. See [REST setup, protocol, and safeguards](docs/zetaris_rest.md)
+for the exact query allowlist, response representation, troubleshooting, and
+the distinction between automated tests and live verification.
