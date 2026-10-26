@@ -1,0 +1,112 @@
+[
+  {
+    "scenario_id": "S01",
+    "scenario_name": "Suspected Account Compromise",
+    "alert_ids": [
+      "ALT0015",
+      "ALT0016",
+      "ALT0017"
+    ],
+    "actual_cause": "Stolen password used to access and export client data.",
+    "expected_assessment": "HIGH CONCERN",
+    "key_evidence_ids": [
+      "AUTH000958",
+      "AUTH000959",
+      "AUTH000960",
+      "AUTH000961",
+      "ACCESS001992",
+      "ACCESS001993",
+      "ACCESS001994"
+    ],
+    "window_start": "2026-09-15T01:12:00Z",
+    "window_end": "2026-09-15T01:27:00Z",
+    "explanation": "The fictional cause is credential theft. New source and device, repeated failures, password-only success, sensitive access and a large export support strong suspicion. Telemetry does not identify the operator. The account's Sales permissions allow access; approval of access is not proof of intent."
+  },
+  {
+    "scenario_id": "S02",
+    "scenario_name": "Corporate VPN False Positive",
+    "alert_ids": [
+      "ALT0018"
+    ],
+    "actual_cause": "Legitimate use of the corporate US VPN egress.",
+    "expected_assessment": "LOW CONCERN",
+    "key_evidence_ids": [
+      "AUTH000962",
+      "AUTH000963",
+      "ACCESS001995",
+      "ACCESS001996",
+      "ACCESS001997",
+      "ACCESS001998"
+    ],
+    "window_start": "2026-09-10T10:05:00Z",
+    "window_end": "2026-09-10T10:29:00Z",
+    "explanation": "The second IP exactly matches an active CORPORATE_VPN record. Both sessions use the user's established device and MFA. Engineering activity is small, authorised and routine with no export. The location is the observed egress location, not the employee's physical position. An approved network is supporting evidence, not a blanket guarantee of legitimacy."
+  },
+  {
+    "scenario_id": "S03",
+    "scenario_name": "Ambiguous Data Export",
+    "alert_ids": [
+      "ALT0019"
+    ],
+    "actual_cause": "Authorised late-night export; business purpose is unknown.",
+    "expected_assessment": "NEEDS FURTHER INVESTIGATION",
+    "key_evidence_ids": [
+      "AUTH000964",
+      "ACCESS001999",
+      "ACCESS002000"
+    ],
+    "window_start": "2026-09-17T22:42:00Z",
+    "window_end": "2026-09-17T22:51:00Z",
+    "explanation": "A finance employee uses an established home source and device with MFA to export an unusually large confidential dataset. Department access is permitted. No approval ticket, destination or business justification is available. Human verification is needed; neither malicious intent nor a legitimate reporting task is established, including by this evaluation record."
+  },
+  {
+    "scenario_id": "S04",
+    "scenario_name": "Password Spraying",
+    "alert_ids": [
+      "ALT0020"
+    ],
+    "actual_cause": "External password-spraying attempt; all observed attempts failed.",
+    "expected_assessment": "HIGH CONCERN — NO CONFIRMED COMPROMISE",
+    "key_evidence_ids": [
+      "AUTH000965",
+      "AUTH000966",
+      "AUTH000967",
+      "AUTH000968",
+      "AUTH000969",
+      "AUTH000970",
+      "AUTH000971",
+      "AUTH000972",
+      "AUTH000973",
+      "AUTH000974",
+      "AUTH000975",
+      "AUTH000976",
+      "AUTH000977",
+      "AUTH000978",
+      "AUTH000979",
+      "AUTH000980",
+      "AUTH000981",
+      "AUTH000982",
+      "AUTH000983",
+      "AUTH000984",
+      "AUTH000985",
+      "AUTH000986",
+      "AUTH000987",
+      "AUTH000988",
+      "AUTH000989",
+      "AUTH000990",
+      "AUTH000991",
+      "AUTH000992",
+      "AUTH000993",
+      "AUTH000994",
+      "AUTH000995",
+      "AUTH000996",
+      "AUTH000997",
+      "AUTH000998",
+      "AUTH000999",
+      "AUTH001000"
+    ],
+    "window_start": "2026-09-18T04:12:03Z",
+    "window_end": "2026-09-18T04:16:40Z",
+    "explanation": "One unfamiliar source targets twelve accounts in repeated rounds. Every attempt fails and creates no session. No success from that IP exists in the scenario window or elsewhere in this dataset. These records establish an attempted attack, not successful account compromise."
+  }
+]

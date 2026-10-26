@@ -1,0 +1,21 @@
+alert_id,timestamp,alert_type,severity,user_id,source_ip,description,related_event_ids,status
+ALT0001,2026-09-08T09:23:30Z,MULTIPLE_FAILED_LOGINS,LOW,U001,198.51.100.51,Repeated failures followed by an MFA login on the same device.,"[""AUTH000026"",""AUTH000027"",""AUTH000028""]",CLOSED
+ALT0002,2026-09-09T09:34:30Z,MULTIPLE_FAILED_LOGINS,LOW,U004,198.51.100.54,Repeated failures followed by an MFA login on the same device.,"[""AUTH000029"",""AUTH000030"",""AUTH000031""]",CLOSED
+ALT0003,2026-09-10T09:22:30Z,MULTIPLE_FAILED_LOGINS,LOW,U007,198.51.100.57,Repeated failures followed by an MFA login on the same device.,"[""AUTH000032"",""AUTH000033"",""AUTH000034""]",CLOSED
+ALT0018,2026-09-10T10:12:00Z,IMPOSSIBLE_TRAVEL,HIGH,U001,203.0.113.10,London and New York sign-ins observed six minutes apart.,"[""AUTH000962"",""AUTH000963""]",OPEN
+ALT0010,2026-09-11T08:41:28Z,UNUSUAL_RESOURCE_ACCESS,LOW,U009,198.51.100.59,Department policy denied a request to a restricted workspace.,"[""ACCESS001653""]",CLOSED
+ALT0004,2026-09-11T09:44:30Z,MULTIPLE_FAILED_LOGINS,LOW,U010,198.51.100.60,Repeated failures followed by an MFA login on the same device.,"[""AUTH000035"",""AUTH000036"",""AUTH000037""]",CLOSED
+ALT0008,2026-09-11T09:54:24Z,UNUSUAL_RESOURCE_ACCESS,LOW,U001,192.0.2.10,Department policy denied a request to a restricted workspace.,"[""ACCESS000808""]",CLOSED
+ALT0013,2026-09-11T10:13:31Z,UNUSUAL_LOGIN,MEDIUM,U002,192.0.2.10,Device or sign-in context differs from the monitoring baseline.,"[""AUTH000048""]",ACKNOWLEDGED
+ALT0011,2026-09-11T10:25:02Z,UNUSUAL_RESOURCE_ACCESS,LOW,U013,192.0.2.10,Department policy denied a request to a restricted workspace.,"[""ACCESS000270""]",CLOSED
+ALT0005,2026-09-14T09:16:30Z,MULTIPLE_FAILED_LOGINS,LOW,U013,198.51.100.63,Repeated failures followed by an MFA login on the same device.,"[""AUTH000038"",""AUTH000039"",""AUTH000040""]",CLOSED
+ALT0014,2026-09-14T09:43:40Z,UNUSUAL_LOGIN,MEDIUM,U001,198.51.100.51,Device or sign-in context differs from the monitoring baseline.,"[""AUTH000049""]",ACKNOWLEDGED
+ALT0009,2026-09-14T12:59:02Z,UNUSUAL_RESOURCE_ACCESS,LOW,U007,192.0.2.10,Department policy denied a request to a restricted workspace.,"[""ACCESS000701""]",CLOSED
+ALT0012,2026-09-14T13:04:22Z,UNUSUAL_LOGIN,MEDIUM,U004,198.51.100.54,Device or sign-in context differs from the monitoring baseline.,"[""AUTH000047""]",ACKNOWLEDGED
+ALT0015,2026-09-15T01:15:00Z,MULTIPLE_FAILED_LOGINS,MEDIUM,U013,203.0.113.201,Three failed password attempts from a source absent from recent user history.,"[""AUTH000958"",""AUTH000959"",""AUTH000960""]",OPEN
+ALT0016,2026-09-15T01:17:00Z,UNUSUAL_LOGIN,HIGH,U013,203.0.113.201,New device and foreign source observed outside the user's usual working hours.,"[""AUTH000961""]",OPEN
+ALT0017,2026-09-15T01:28:00Z,UNUSUAL_DATA_EXPORT,HIGH,U013,203.0.113.201,2.4 GB export from the client delivery warehouse exceeds the normal volume baseline.,"[""ACCESS001994""]",OPEN
+ALT0006,2026-09-15T09:47:30Z,MULTIPLE_FAILED_LOGINS,LOW,U016,198.51.100.66,Repeated failures followed by an MFA login on the same device.,"[""AUTH000041"",""AUTH000042"",""AUTH000043""]",CLOSED
+ALT0007,2026-09-16T09:36:30Z,MULTIPLE_FAILED_LOGINS,LOW,U019,198.51.100.69,Repeated failures followed by an MFA login on the same device.,"[""AUTH000044"",""AUTH000045"",""AUTH000046""]",CLOSED
+ALT0019,2026-09-17T22:52:00Z,UNUSUAL_DATA_EXPORT,HIGH,U008,198.51.100.58,950 MB financial reporting export observed outside usual working hours.,"[""ACCESS002000""]",OPEN
+ALT0020,2026-09-18T04:18:00Z,PASSWORD_SPRAYING,HIGH,,203.0.113.240,One source generated 36 failed password attempts across 12 accounts within five minutes.,"[""AUTH000965"",""AUTH000966"",""AUTH000967"",""AUTH000968"",""AUTH000969"",""AUTH000970"",""AUTH000971"",""AUTH000972"",""AUTH000973"",""AUTH000974"",""AUTH000975"",""AUTH000976"",""AUTH000977"",""AUTH000978"",""AUTH000979"",""AUTH000980"",""AUTH000981"",""AUTH000982"",""AUTH000983"",""AUTH000984"",""AUTH000985"",""AUTH000986"",""AUTH000987"",""AUTH000988"",""AUTH000989"",""AUTH000990"",""AUTH000991"",""AUTH000992"",""AUTH000993"",""AUTH000994"",""AUTH000995"",""AUTH000996"",""AUTH000997"",""AUTH000998"",""AUTH000999"",""AUTH001000""]",OPEN

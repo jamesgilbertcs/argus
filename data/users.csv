@@ -1,0 +1,26 @@
+user_id,display_name,department,role,employment_status,primary_location,usual_work_start,usual_work_end
+U001,Ada Fenwick,Engineering,Engineering Manager,ACTIVE,"London, UK",08:00,16:00
+U002,Ravi Ashcombe,Engineering,Platform Engineer,ACTIVE,"Manchester, UK",08:30,16:30
+U003,Maya Bellcroft,Engineering,Data Engineer,ACTIVE,"Bristol, UK",09:00,17:00
+U004,Leo Wrenford,Engineering,Software Engineer,ACTIVE,"Leeds, UK",09:30,17:30
+U005,Zara Hatherley,Engineering,Software Engineer,ACTIVE,"Edinburgh, UK",08:00,16:00
+U006,Owen Merewood,Engineering,Data Engineer,ACTIVE,"London, UK",08:30,16:30
+U007,Nina Alderwick,Engineering,QA Engineer,ACTIVE,"Manchester, UK",09:00,17:00
+U008,Clara Eastmere,Finance,Financial Analyst,ACTIVE,"Bristol, UK",09:30,17:30
+U009,Idris Thornwell,Finance,Finance Manager,ACTIVE,"Leeds, UK",08:00,16:00
+U010,Freya Dalesford,Finance,Payroll Specialist,ACTIVE,"Edinburgh, UK",08:30,16:30
+U011,Hugo Penwick,Finance,Accounts Analyst,ACTIVE,"London, UK",09:00,17:00
+U012,Elena Foxmere,Finance,Financial Controller,ACTIVE,"Manchester, UK",09:30,17:30
+U013,Theo Brambleton,Sales,Account Manager,ACTIVE,"Bristol, UK",08:00,16:00
+U014,Asha Lindenford,Sales,Sales Manager,ACTIVE,"Leeds, UK",08:30,16:30
+U015,Felix Norcroft,Sales,Account Executive,ACTIVE,"Edinburgh, UK",09:00,17:00
+U016,Iris Hawkridge,Sales,Sales Analyst,ACTIVE,"London, UK",09:30,17:30
+U017,Sam Willowden,Sales,Customer Success Manager,ACTIVE,"Manchester, UK",08:00,16:00
+U018,Lila Mossfield,Sales,Account Executive,ACTIVE,"Bristol, UK",08:30,16:30
+U019,Esme Brookvale,Human Resources,HR Manager,ACTIVE,"Leeds, UK",09:00,17:00
+U020,Noah Elmstead,Human Resources,People Operations Analyst,ACTIVE,"Edinburgh, UK",09:30,17:30
+U021,Talia Reedwick,Human Resources,Recruitment Coordinator,ACTIVE,"London, UK",08:00,16:00
+U022,Arun Birchford,Human Resources,HR Advisor,ACTIVE,"Manchester, UK",08:30,16:30
+U023,Priya Stonefell,IT / Security,Security Analyst,ACTIVE,"Bristol, UK",09:00,17:00
+U024,Jude Fairbourne,IT / Security,Systems Administrator,ACTIVE,"Leeds, UK",09:30,17:30
+U025,Mila Oakridge,IT / Security,IT Support Engineer,ACTIVE,"Edinburgh, UK",08:00,16:00
