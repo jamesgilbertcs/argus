@@ -1,0 +1,11 @@
+network_id,ip_address,network_type,description,advertised_location,status
+N001,192.0.2.10,OFFICE,London headquarters egress,London%2C UK,ACTIVE
+N002,192.0.2.11,OFFICE,Manchester shared office egress,Manchester%2C UK,ACTIVE
+N003,198.51.100.10,CORPORATE_VPN,UK primary VPN egress,London%2C UK,ACTIVE
+N004,198.51.100.11,CORPORATE_VPN,UK secondary VPN egress,Manchester%2C UK,ACTIVE
+N005,203.0.113.10,CORPORATE_VPN,US regional VPN egress,New York%2C US,ACTIVE
+N006,203.0.113.11,CORPORATE_VPN,EU regional VPN egress,Frankfurt%2C DE,ACTIVE
+N007,203.0.113.30,CLOUD_INFRASTRUCTURE,Application service egress,London%2C UK,ACTIVE
+N008,203.0.113.31,CLOUD_INFRASTRUCTURE,Database service egress,Dublin%2C IE,ACTIVE
+N009,203.0.113.32,CLOUD_INFRASTRUCTURE,Monitoring service egress,London%2C UK,ACTIVE
+N010,192.0.2.99,CORPORATE_VPN,Retired VPN endpoint,London%2C UK,INACTIVE

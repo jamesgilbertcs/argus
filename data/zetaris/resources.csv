@@ -1,0 +1,16 @@
+resource_id,resource_name,resource_type,owner_department,sensitivity,allowed_departments
+R001,Customer CRM,APPLICATION,Sales,CONFIDENTIAL,|Sales|
+R002,Financial Reporting Database,DATABASE,Finance,CONFIDENTIAL,|Finance|
+R003,Payroll Database,DATABASE,Finance,RESTRICTED,|Finance|Human Resources|
+R004,HR Employee Records,DATABASE,Human Resources,RESTRICTED,|Human Resources|
+R005,Source Code Repository,REPOSITORY,Engineering,CONFIDENTIAL,|Engineering|
+R006,Development Infrastructure,INFRASTRUCTURE,Engineering,INTERNAL,|Engineering|IT / Security|
+R007,Internal Document Storage,STORAGE,IT / Security,INTERNAL,|Engineering|Finance|Sales|Human Resources|IT / Security|
+R008,Security Monitoring Dashboard,APPLICATION,IT / Security,RESTRICTED,|IT / Security|
+R009,Corporate Intranet,APPLICATION,IT / Security,INTERNAL,|Engineering|Finance|Sales|Human Resources|IT / Security|
+R010,Public Product Documentation,STORAGE,Engineering,PUBLIC,|Engineering|Finance|Sales|Human Resources|IT / Security|
+R011,Sales Proposal Library,STORAGE,Sales,CONFIDENTIAL,|Sales|
+R012,Client Delivery Warehouse,DATABASE,Engineering,RESTRICTED,|Engineering|Sales|Finance|
+R013,Recruitment Portal,APPLICATION,Human Resources,CONFIDENTIAL,|Human Resources|
+R014,IT Asset Inventory,DATABASE,IT / Security,INTERNAL,|IT / Security|
+R015,Finance Planning Workspace,APPLICATION,Finance,CONFIDENTIAL,|Finance|

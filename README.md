@@ -15,6 +15,7 @@ Use Python 3.10 or later; no third-party packages are required. From the reposit
 
 ```sh
 python scripts/generate_data.py
+python scripts/export_zetaris.py
 python -m unittest discover -s tests -v
 ```
 
@@ -30,6 +31,15 @@ python scripts/generate_data.py --seed 42 --output-dir scratch/seed42
 The tests validate the repository's reference files, including their agreement with
 the default generator output. Restore the default seed before testing after any
 in-place experiments.
+
+For Zetaris, upload the six files from `data/zetaris/`. The standalone
+`scripts/export_zetaris.py` reads the canonical CSVs without regenerating or
+modifying them. It exports reversible pipe-framed lists and escapes unsafe text
+characters to avoid embedded CSV quotes/commas. After changing canonical data,
+rerun the exporter. It prints row counts, byte sizes, and SHA-256 checksums.
+See [Zetaris exports and manual validation](docs/zetaris_exports.md) for encoding,
+decoding, registration under `ARGUS_SECURITY`, and SQL checks. Local tests do
+not establish successful Zetaris ingestion.
 
 See [the synthetic environment documentation](docs/synthetic_environment.md) for
 schemas, relationships, scenarios, assumptions, and import guidance.

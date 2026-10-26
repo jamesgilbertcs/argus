@@ -1,0 +1,2 @@
+# Keep the deterministic Zetaris artifacts byte-stable on Windows checkouts.
+/data/zetaris/*.csv text eol=lf

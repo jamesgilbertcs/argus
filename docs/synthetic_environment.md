@@ -175,11 +175,15 @@ Multi-user alerts require following these references rather than filtering by an
 empty alert `user_id`. Baseline device/source history is obtained from earlier
 authentication rows for the same employee; there is no separate device inventory.
 
-The six CSVs are self-contained import artifacts. Configure a future Zetaris
-import with identifiers as strings, bytes as a 64-bit integer (the 2.4 GB export
-exceeds signed 32-bit range), and timestamps as UTC. Retain JSON cells as strings
-until parsed by the query layer. Treat empty optional cells as null if required
-by the destination. No Zetaris connector or automated import is implemented here.
+The six canonical CSVs retain their original JSON cells and standard CSV quoting.
+For Zetaris's current CSV reader, generate the separate ingestion representation
+with `python scripts/export_zetaris.py` and upload only the six files in
+`data/zetaris/`. See [Zetaris exports](zetaris_exports.md) for the audited columns,
+reversible encoding, registration steps, and SQL validation. Use identifiers as
+strings and bytes as a 64-bit integer (the 2.4 GB export exceeds signed 32-bit
+range). Preserve UTC timestamps. Treat empty optional cells as null if required
+by the destination, keeping them distinct from an encoded empty list. No Zetaris
+connector or automated upload is implemented here; the generator is unchanged.
 
 ## Designed investigations and evaluation separation
 
