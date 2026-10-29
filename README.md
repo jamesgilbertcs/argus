@@ -45,8 +45,8 @@ See [the synthetic environment documentation](docs/synthetic_environment.md) for
 schemas, relationships, scenarios, assumptions, and import guidance.
 [`evaluation/scenario_ground_truth.json`](evaluation/scenario_ground_truth.json)
 contains evaluation answers: keep it separate from the operational evidence supplied
-to a future investigator. No AI agent, LLM calls, orchestration, or frontend is
-implemented.
+to an investigator. Autonomous investigation, orchestration and a frontend are
+not implemented.
 
 The read-only direct REST client is in `scripts/zetaris_client.py`. Configure
 `ZETARIS_REST_URL`, `ZETARIS_ORG_ID`, and `ZETARIS_API_KEY` in the existing
@@ -74,3 +74,19 @@ separate wire trace under `artifacts/evidence/`. It resolves references, session
 bounded histories, users, resources and exact network matches, recording missing
 or incomplete evidence explicitly. It produces no incident assessment. See the
 [evidence-bundle schema and collection guide](docs/evidence_collection.md).
+
+Phase 3B reasons over an **existing** bundle without querying Zetaris:
+
+```sh
+python scripts/reason_evidence.py artifacts/evidence/ALT0018.json --provider mock
+python scripts/reason_evidence.py artifacts/evidence/ALT0018.json --provider openai
+```
+
+Provider selection is mandatory. `mock` produces a labelled, deterministic plumbing
+demonstration with no model interpretation. `openai` requires `OPENAI_API_KEY` and
+`ARGUS_OPENAI_MODEL` in the environment or ignored `.env.local` and sends the compact
+evidence view to OpenAI. It has no tools or database access. Both modes validate
+structured citations and acknowledge collection limitations before writing an
+assessment and its reasoning view to `artifacts/assessments/`. Validation does not
+establish factual correctness; a human must review provisional assessments.
+See [reasoning schemas, safeguards and provider verification](docs/evidence_reasoning.md).
