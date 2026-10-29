@@ -62,3 +62,15 @@ the existing `ARGUS_SECURITY.*_compat_test` tables. Normal tests mock HTTP and
 require no live instance. See [REST setup, protocol, and safeguards](docs/zetaris_rest.md)
 for the exact query allowlist, response representation, troubleshooting, and
 the distinction between automated tests and live verification.
+
+Phase 3A adds bounded, deterministic evidence collection for any alert ID:
+
+```sh
+python scripts/collect_evidence.py ALT0017
+```
+
+This reads operational evidence through Zetaris and writes a JSON bundle plus a
+separate wire trace under `artifacts/evidence/`. It resolves references, sessions,
+bounded histories, users, resources and exact network matches, recording missing
+or incomplete evidence explicitly. It produces no incident assessment. See the
+[evidence-bundle schema and collection guide](docs/evidence_collection.md).

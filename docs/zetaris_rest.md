@@ -316,3 +316,8 @@ Only the three live-check statements are part of the integration acceptance
 check. The additional allowlisted previews/counts, remote HTTPS deployments,
 server permission enforcement, pagination and larger workloads need their own
 live validation before being relied upon.
+
+Phase 3A additionally exposes `execute_evidence_query` for validated, closed
+lookup/history templates. It shares this transport and its safeguards without
+expanding the SQL-string allowlist. See [evidence collection](evidence_collection.md)
+for scope bounds, timestamp provenance, completeness and evidence-bundle schema.

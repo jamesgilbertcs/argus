@@ -267,8 +267,25 @@ class ZetarisClient:
 
     def execute_read_only(self, sql: str) -> QueryResult:
         statement = approved_sql(sql)
+        return self._execute(statement, self.config.query_limit)
+
+    def execute_evidence_query(self, query: Any, *, limit: int = 200) -> QueryResult:
+        """Only closed EvidenceQuery templates may extend the fixed SQL catalogue."""
+        if __package__:
+            from .evidence_queries import EvidenceQuery
+        else:
+            from evidence_queries import EvidenceQuery
+        if type(query) is not EvidenceQuery or type(limit) is not int or not 1 <= limit <= self.config.query_limit:
+            raise SQLPolicyError("Invalid bounded evidence query")
+        try:
+            statement = EvidenceQuery.sql(query)
+        except (ValueError, TypeError, AttributeError):
+            raise SQLPolicyError("Invalid bounded evidence query") from None
+        return self._execute(statement, limit)
+
+    def _execute(self, statement: str, limit: int) -> QueryResult:
         request_id, query_id = str(uuid.uuid4()), str(uuid.uuid4())
-        body = {"queryId": query_id, "sql": statement, "source": "SqlEditor", "limit": self.config.query_limit}
+        body = {"queryId": query_id, "sql": statement, "source": "SqlEditor", "limit": limit}
         endpoint = self.config.rest_url + SQL_PATH
         request = Request(endpoint, data=json.dumps(body).encode("utf-8"), method="POST", headers={
             "Authorization": f"Bearer {self.config.api_key}", "X-Org-ID": self.config.org_id,
@@ -305,7 +322,7 @@ class ZetarisClient:
             if isinstance(reason, PermissionError):
                 raise ConnectionError("Network access denied; check execution-environment permissions", request_id=request_id) from None
             raise ConnectionError("Cannot reach the configured Zetaris endpoint", request_id=request_id) from None
-        return parse_result(payload, request_id=request_id, query_id=query_id, limit=self.config.query_limit)
+        return parse_result(payload, request_id=request_id, query_id=query_id, limit=limit)
 
 
 def exact_integer(value: Any) -> int:

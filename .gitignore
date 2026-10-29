@@ -228,3 +228,6 @@ __marimo__/
 # Local SQLite databases
 *.db
 *.sqlite3
+
+# Generated investigation evidence
+/artifacts/evidence
