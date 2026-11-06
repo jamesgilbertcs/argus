@@ -6,13 +6,24 @@ Validation establishes structure and citation membership, not factual correctnes
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from decimal import Decimal
 from typing import Any
 
 if __package__:
     from .reasoning_view import COLLECTION_STATES, ReasoningError
+    from .evidence_relationships import derive_relationships
+    from .evidence_collector import canonical
 else:
     from reasoning_view import COLLECTION_STATES, ReasoningError
+    from evidence_relationships import derive_relationships
+    from evidence_collector import canonical
+
+
+class JSONValidationError(ReasoningError):
+    def __init__(self, check: str, *, line: int | None = None, column: int | None = None) -> None:
+        self.details = {"check": check, "line": line, "column": column}
+        super().__init__("Invalid JSON input or response: " + check)
 
 
 def strict_json(text: str) -> Any:
@@ -21,19 +32,29 @@ def strict_json(text: str) -> Any:
         result = {}
         for key, value in items:
             if key in result:
-                raise ValueError
+                raise JSONValidationError("DUPLICATE_PROPERTIES")
             result[key] = value
         return result
 
     def constant(_: str) -> Any:
-        raise ValueError
+        raise JSONValidationError("NON_JSON_CONSTANT")
 
     try:
-        if not isinstance(text, str) or len(text.encode("utf-8")) > 8_388_608:
-            raise ValueError
+        if not isinstance(text, str):
+            raise JSONValidationError("INPUT_TYPE")
+        if len(text.encode("utf-8")) > 8_388_608:
+            raise JSONValidationError("BYTE_LIMIT")
         return json.loads(text, object_pairs_hook=pairs, parse_float=Decimal, parse_constant=constant)
+    except JSONValidationError:
+        raise
+    except json.JSONDecodeError as error:
+        raise JSONValidationError("SYNTAX", line=error.lineno, column=error.colno) from None
+    except UnicodeError:
+        raise JSONValidationError("ENCODING") from None
+    except RecursionError:
+        raise JSONValidationError("NESTING_LIMIT") from None
     except (ValueError, TypeError, RecursionError, UnicodeError):
-        raise ReasoningError("Invalid JSON input or response") from None
+        raise JSONValidationError("INVALID_JSON") from None
 
 
 def obj(properties: dict) -> dict:
@@ -48,7 +69,7 @@ STRING = {"type": "string"}
 CITATION = obj({"table": STRING, "id": STRING, "variant_id": STRING})
 FINDING = obj({"kind": {"type": "string", "enum": ["OBSERVED_FACT", "INTERPRETATION"]},
                "statement": STRING, "evidence": array(CITATION)})
-ASSESSMENT_SCHEMA = obj({
+LEGACY_ASSESSMENT_SCHEMA = obj({
     "schema_version": {"type": "string", "enum": ["1.0"]},
     "alert_id": STRING,
     "classification": {"type": "string", "enum": ["LIKELY_TRUE_POSITIVE", "LIKELY_FALSE_POSITIVE", "INCONCLUSIVE"]},
@@ -64,32 +85,95 @@ ASSESSMENT_SCHEMA = obj({
     "evidence_complete": {"type": "boolean", "enum": [False]},
 })
 
+FACT_KINDS = ["NETWORK_MATCH_STATUS", "SHARED_REPORTED_DEVICE_ID", "AUTHENTICATION_OUTCOME",
+              "AUTHENTICATION_TIMESTAMP", "AUTHENTICATION_UTC", "AUTHENTICATION_DELTA_MICROSECONDS"]
+CLAIM = obj({"fact_id": STRING, "kind": {"type": "string", "enum": FACT_KINDS},
+             "value": {"anyOf": [{"type": "string"}, {"type": "integer"}, {"type": "null"}]},
+             "evidence": array(CITATION)})
+ASSESSMENT_SCHEMA = deepcopy(LEGACY_ASSESSMENT_SCHEMA)
+ASSESSMENT_SCHEMA["properties"].update({"schema_version": {"type": "string", "enum": ["2.0"]},
+                                         "assessed_hypothesis": STRING, "factual_claims": array(CLAIM)})
+ASSESSMENT_SCHEMA["required"] = list(ASSESSMENT_SCHEMA["properties"])
 
-def _structure(value: Any, schema: dict, *, depth: int = 0) -> None:
+
+class FactualConsistencyError(ReasoningError):
+    def __init__(self, code: str, *, claim_index: int | None = None, fact_id: str | None = None) -> None:
+        # No model-supplied IDs, values, statements or credentials in diagnostics.
+        self.details = {"check": code, "claim_index": claim_index, "fact_id": fact_id}
+        super().__init__("Factual consistency check failed: " + code)
+
+
+class SchemaValidationError(ReasoningError):
+    def __init__(self, check: str, path: str, expected: Any, value: Any) -> None:
+        self.details = {"check": check, "path": path, "expected": expected, "actual_type": type(value).__name__}
+        super().__init__(f"Assessment schema check failed: {check} at {path}")
+
+
+def _structure(value: Any, schema: dict, *, depth: int = 0, path: str = "assessment") -> None:
     """Validate precisely the small schema subset above; no external dependency."""
     if depth > 20:
         raise ReasoningError("Assessment nesting exceeds the limit")
+    if "anyOf" in schema:
+        for alternative in schema["anyOf"]:
+            try:
+                _structure(value, alternative, depth=depth + 1, path=path)
+                return
+            except ReasoningError:
+                continue
+        raise SchemaValidationError("VALUE_TYPE", path, [s["type"] for s in schema["anyOf"]], value)
     kind = schema["type"]
     valid = {"object": type(value) is dict, "array": type(value) is list,
-             "string": type(value) is str, "boolean": type(value) is bool}[kind]
-    if not valid or ("enum" in schema and value not in schema["enum"]):
-        raise ReasoningError("Assessment has an invalid type or enum value")
+             "string": type(value) is str, "boolean": type(value) is bool,
+             "integer": type(value) is int, "null": value is None}[kind]
+    if not valid:
+        raise SchemaValidationError("TYPE", path, kind, value)
+    if "enum" in schema and value not in schema["enum"]:
+        raise SchemaValidationError("ENUM", path, schema["enum"], value)
     if kind == "object":
         if set(value) != set(schema["properties"]):
-            raise ReasoningError("Assessment has missing or unexpected fields")
+            raise SchemaValidationError("FIELDS", path, {"required": list(schema["properties"])}, value)
         for key, child in schema["properties"].items():
-            _structure(value[key], child, depth=depth + 1)
+            _structure(value[key], child, depth=depth + 1, path=path + "." + key)
     elif kind == "array":
         if len(value) > 1000:
             raise ReasoningError("Assessment array exceeds the limit")
-        for item in value:
-            _structure(item, schema["items"], depth=depth + 1)
+        for index, item in enumerate(value):
+            _structure(item, schema["items"], depth=depth + 1, path=f"{path}[{index}]")
     elif kind == "string" and (not value.strip() or len(value) > 6000):
         raise ReasoningError("Assessment text is empty or exceeds the limit")
 
 
-def validate_assessment(assessment: dict, view: dict) -> dict:
-    _structure(assessment, ASSESSMENT_SCHEMA)
+def validate_structure(assessment: dict, *, allow_legacy: bool = False) -> None:
+    schema = LEGACY_ASSESSMENT_SCHEMA if allow_legacy and type(assessment) is dict and assessment.get("schema_version") == "1.0" else ASSESSMENT_SCHEMA
+    _structure(assessment, schema)
+
+
+def validate_factual_claims(assessment: dict, view: dict) -> None:
+    # Recompute from admitted source records/checks, not model assertions or a
+    # possibly edited fact catalog supplied by a caller.
+    expected = derive_relationships(view)
+    facts = {f["fact_id"]: f for f in expected["facts"]}
+    seen = set()
+    for index, claim in enumerate(assessment["factual_claims"]):
+        fact = facts.get(claim["fact_id"])
+        if fact is None:
+            raise FactualConsistencyError("UNKNOWN_FACT", claim_index=index)
+        safe_id = fact["fact_id"]
+        if safe_id in seen:
+            raise FactualConsistencyError("DUPLICATE_FACT_CLAIM", claim_index=index, fact_id=safe_id)
+        seen.add(safe_id)
+        if claim["kind"] != fact["kind"]:
+            raise FactualConsistencyError("FACT_KIND_MISMATCH", claim_index=index, fact_id=safe_id)
+        if type(claim["value"]) is not type(fact["value"]) or claim["value"] != fact["value"]:
+            raise FactualConsistencyError("FACT_VALUE_MISMATCH", claim_index=index, fact_id=safe_id)
+        if sorted(map(canonical, claim["evidence"])) != sorted(map(canonical, fact["evidence"])):
+            raise FactualConsistencyError("FACT_EVIDENCE_MISMATCH", claim_index=index, fact_id=safe_id)
+    if not set(expected["required_fact_ids"]) <= seen:
+        raise FactualConsistencyError("REQUIRED_FACT_CLAIM_MISSING")
+
+
+def validate_assessment(assessment: dict, view: dict, *, allow_legacy: bool = False, check_facts: bool = True) -> dict:
+    validate_structure(assessment, allow_legacy=allow_legacy)
     if assessment["alert_id"] != view["alert_id"]:
         raise ReasoningError("Assessment alert ID does not match the evidence")
     if assessment["collection_status"] != view["collection_status"]:
@@ -124,6 +208,8 @@ def validate_assessment(assessment: dict, view: dict) -> dict:
     has_alert = any(r["source"]["table"] == "ARGUS_SECURITY.security_alerts_compat_test" for r in view["records"])
     if not has_alert and (assessment["classification"] != "INCONCLUSIVE" or assessment["confidence"] != "LOW"):
         raise ReasoningError("An absent alert requires an inconclusive, low-confidence assessment")
+    if check_facts and assessment["schema_version"] == "2.0":
+        validate_factual_claims(assessment, view)
     return assessment
 
 

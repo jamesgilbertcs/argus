@@ -49,7 +49,10 @@ class MockProvider:
         alerts = [r for r in view["records"] if r["source"]["table"] == "ARGUS_SECURITY.security_alerts_compat_test"]
         evidence = [r["source"] for r in (alerts[:1] or view["records"][:1])]
         assessment = {
-            "schema_version": "1.0", "alert_id": view["alert_id"],
+            "schema_version": "2.0", "alert_id": view["alert_id"],
+            "assessed_hypothesis": "The alert describes activity warranting a security investigation; this mock does not assess it.",
+            "factual_claims": [{key: fact[key] for key in ("fact_id", "kind", "value", "evidence")}
+                               for fact in view["relationships"]["facts"] if fact["required"]],
             "classification": "INCONCLUSIVE", "confidence": "LOW",
             "executive_summary": "MOCK-GENERATED: pipeline demonstration only. No model interpretation or incident conclusion was produced.",
             "key_findings": ([{"kind": "OBSERVED_FACT", "statement": "A source record was supplied for review.",

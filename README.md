@@ -98,3 +98,10 @@ no OpenAI or NVIDIA key for this provider. It uses prompt-instructed JSON chat
 completions followed by the same mandatory assessment validation. Run
 `python scripts/check_meterless.py --infer` for explicit model-discovery and small
 inference checks. See [Meterless setup and live verification](docs/evidence_reasoning.md#meterless-nightshift-provider).
+
+Phase 3B.2 adds deterministic network/device/time/session relationships and a
+version 2.0 assessment contract with mandatory, machine-checkable factual claims
+for explicitly referenced authentications. Contradictory claims fail validation
+and produce credential-safe local diagnostics. This does not fact-check arbitrary
+prose or establish that an account is uncompromised. See the
+[reasoning hardening and schema migration guide](docs/reasoning_hardening.md).

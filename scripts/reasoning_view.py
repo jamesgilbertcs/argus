@@ -10,10 +10,12 @@ from typing import Any
 if __package__:
     from .evidence_collector import canonical
     from .evidence_queries import KEYS, identifier
+    from .evidence_relationships import derive_relationships
     from .export_zetaris import ARRAY_FIELDS, TEXT_FIELDS, decode_array, decode_text
 else:
     from evidence_collector import canonical
     from evidence_queries import KEYS, identifier
+    from evidence_relationships import derive_relationships
     from export_zetaris import ARRAY_FIELDS, TEXT_FIELDS, decode_array, decode_text
 
 
@@ -53,7 +55,7 @@ def build_reasoning_view(bundle: dict[str, Any], *, max_bytes: int = DEFAULT_VIE
     _require(set(bundle["records"]) == set(KEYS))
     for field in ("references", "network_checks", "queries", "issues"):
         _require(type(bundle[field]) is list and all(type(item) is dict for item in bundle[field]))
-    view = {"schema_version": "1.0", "alert_id": bundle["alert_id"], "bundle_sha256": digest(bundle),
+    view = {"schema_version": "2.0", "alert_id": bundle["alert_id"], "bundle_sha256": digest(bundle),
             "collection_status": bundle["collection_status"], "scope": deepcopy(bundle["scope"]),
             "selection_policy": "all_records_all_variants_no_truncation",
             "records": [], "references": deepcopy(bundle["references"]),
@@ -151,6 +153,9 @@ def build_reasoning_view(bundle: dict[str, Any], *, max_bytes: int = DEFAULT_VIE
         gap("alert_record_absent", {"alert_id": bundle["alert_id"]})
     view["records"].sort(key=lambda r: canonical(r["source"]))
     view["query_completeness"].sort(key=lambda q: canonical(q))
+    view["relationships"] = derive_relationships(view)
+    for issue in view["relationships"]["issues"]:
+        gap("relationship_issue", issue)
     view["gaps"] = sorted({g["gap_id"]: g for g in view["gaps"]}.values(), key=lambda g: g["gap_id"])
     if type(max_bytes) is not int or max_bytes < 1 or len(canonical(view).encode("utf-8")) > max_bytes:
         raise ReasoningError("Reasoning view exceeds the input budget; no evidence was truncated")

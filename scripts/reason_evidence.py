@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 from pathlib import Path
 from typing import Any
 
 if __package__:
     from .evidence_collector import serialise
     from .evidence_queries import identifier
-    from .reasoning_assessment import ASSESSMENT_SCHEMA, parse_assessment, strict_json
+    from .reasoning_assessment import ASSESSMENT_SCHEMA, strict_json, validate_assessment, validate_factual_claims, validate_structure
     from .reasoning_prompts import build_prompt
     from .reasoning_providers import MeterlessConfig, MeterlessProvider, MockProvider, OpenAIConfig, OpenAIProvider, ReasoningProvider
     from .reasoning_view import DEFAULT_VIEW_BYTES, ReasoningError, build_reasoning_view, digest
@@ -17,23 +18,53 @@ if __package__:
 else:
     from evidence_collector import serialise
     from evidence_queries import identifier
-    from reasoning_assessment import ASSESSMENT_SCHEMA, parse_assessment, strict_json
+    from reasoning_assessment import ASSESSMENT_SCHEMA, strict_json, validate_assessment, validate_factual_claims, validate_structure
     from reasoning_prompts import build_prompt
     from reasoning_providers import MeterlessConfig, MeterlessProvider, MockProvider, OpenAIConfig, OpenAIProvider, ReasoningProvider
     from reasoning_view import DEFAULT_VIEW_BYTES, ReasoningError, build_reasoning_view, digest
     from zetaris_client import ROOT
 
 
+class ReasoningFailure(ReasoningError):
+    """Failed validation with bounded diagnostics, never the raw model response."""
+
+    def __init__(self, message: str, report: dict) -> None:
+        self.report = report
+        super().__init__(message)
+
+
 def reason_bundle(bundle: dict, provider: ReasoningProvider, *, max_view_bytes: int = DEFAULT_VIEW_BYTES) -> tuple[dict, dict]:
     """No I/O here except the explicitly supplied inference provider."""
     view = build_reasoning_view(bundle, max_bytes=max_view_bytes)
     response = provider.generate(build_prompt(view), ASSESSMENT_SCHEMA)
-    assessment = parse_assessment(response.text, view)
+    stages = {name: "not_run" for name in ("json_parsing", "schema", "citations_and_gaps", "factual_consistency")}
+    stage = "json_parsing"
+    try:
+        assessment = strict_json(response.text)
+        stages[stage] = "passed"
+        stage = "schema"
+        validate_structure(assessment)
+        stages[stage] = "passed"
+        stage = "citations_and_gaps"
+        validate_assessment(assessment, view, check_facts=False)
+        stages[stage] = "passed"
+        stage = "factual_consistency"
+        validate_factual_claims(assessment, view)
+        stages[stage] = "passed"
+    except ReasoningError as error:
+        stages[stage] = "failed"
+        report = {"schema_version": "2.0", "validated_assessment_written": False, "alert_id": view["alert_id"],
+                  "bundle_sha256": view["bundle_sha256"], "reasoning_view_sha256": digest(view),
+                  "provider": {"name": response.provider, "model": response.model, "mock_generated": response.mock_generated},
+                  "validation_stages": stages, "error": str(error), "details": getattr(error, "details", {}),
+                  "response_sha256": hashlib.sha256(response.text.encode("utf-8", errors="surrogatepass")).hexdigest() if isinstance(response.text, str) else None}
+        raise ReasoningFailure(f"{stage}: {error}", report) from None
     result: dict[str, Any] = {
-        "schema_version": "1.0", "bundle_sha256": view["bundle_sha256"], "reasoning_view_sha256": digest(view),
+        "schema_version": "2.0", "bundle_sha256": view["bundle_sha256"], "reasoning_view_sha256": digest(view),
         "provider": {"name": response.provider, "model": response.model, "mock_generated": response.mock_generated,
                      "metadata": response.metadata},
-        "validation": "Structure, citation membership and gap coverage checked; factual correctness is not established.",
+        "validation": "Structure, citation membership, gap coverage and supported structured facts checked; prose and conclusions need human review.",
+        "validation_stages": stages,
         "assessment": assessment,
     }
     return view, result
@@ -55,6 +86,15 @@ def artifact_paths(directory: Path, alert_id: str, provider: str, input_path: Pa
         if path.is_symlink() or (path.exists() and path.stat().st_nlink > 1) or path.resolve() == input_path.resolve():
             raise ReasoningError("Assessment output cannot overwrite the evidence or follow linked files")
     return paths
+
+
+def failure_path(directory: Path, report: dict, input_path: Path) -> Path:
+    assessment, _ = artifact_paths(directory, report["alert_id"], report["provider"]["name"], input_path)
+    suffix = report["response_sha256"] or digest(report)
+    target = assessment.with_name(f"{report['alert_id']}.{report['provider']['name']}.failure.{suffix}.json")
+    if target.is_symlink() or (target.exists() and target.stat().st_nlink > 1) or target.resolve() == input_path.resolve():
+        raise ReasoningError("Failure output cannot overwrite the evidence or follow linked files")
+    return target
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -86,7 +126,17 @@ def main(argv: list[str] | None = None) -> int:
             credential = meterless_config.runtime_token
         else:
             provider = MockProvider()
-        view, result = reason_bundle(bundle, provider, max_view_bytes=args.max_view_bytes)
+        try:
+            view, result = reason_bundle(bundle, provider, max_view_bytes=args.max_view_bytes)
+        except ReasoningFailure as error:
+            diagnostic = serialise(error.report)
+            if credential and credential in diagnostic:
+                raise ReasoningError("Failure diagnostic refused because it contains a configured credential") from None
+            target = failure_path(args.output_dir, error.report, args.bundle)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(diagnostic, encoding="utf-8", newline="\n")
+            print(f"Validation diagnostics: {target}")
+            raise
         payload, view_payload = serialise(result), serialise(view)
         if credential and (credential in payload or credential in view_payload):
             raise ReasoningError("Output refused because it contains a configured credential")

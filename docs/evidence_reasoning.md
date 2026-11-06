@@ -1,5 +1,11 @@
 # Phase 3B: evidence-grounded provisional reasoning
 
+Current outputs use schema **2.0**, adding deterministic evidence relationships,
+structured factual claims and staged failure diagnostics. See the
+[Phase 3B.2 migration and hardening guide](reasoning_hardening.md) for the current
+contract. The version 1.0 sections below describe the retained base fields and
+historical artifacts; new inference must use version 2.0.
+
 This phase interprets an existing Phase 3A JSON bundle. It never queries Zetaris,
 reads local operational CSVs, reads evaluation answers, executes suggested actions,
 or asks a model to retrieve evidence. Collection and reasoning remain separate.
