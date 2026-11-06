@@ -352,6 +352,10 @@ class MeterlessProvider:
         return metadata
 
     def _error_metadata(self, payload: dict, http_status: int, code: str) -> dict:
+        if __package__:
+            from .reasoning_diagnostics import runtime_schema_diagnostics
+        else:
+            from reasoning_diagnostics import runtime_schema_diagnostics
         metadata = self._metadata(http_status=http_status)
         # Only the diagnostic normalizer will consume usage/termination fields;
         # it retains known finish reasons and bounded integer token counts.
@@ -361,6 +365,7 @@ class MeterlessProvider:
         if type(validation) is dict:
             metadata["finish_reason"] = validation.get("finish_reason")
         metadata["meterless"]["structured_output"]["reported_error_code"] = code
+        metadata["meterless"]["structured_output"]["runtime_validation"] = runtime_schema_diagnostics(validation)
         return metadata
 
     def _structured_metadata(self, payload: dict, metadata: dict) -> None:

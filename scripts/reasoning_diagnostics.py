@@ -3,19 +3,87 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import re
 from typing import Any
 
 if __package__:
-    from .reasoning_assessment import ASSESSMENT_SCHEMA, _structure
+    from .reasoning_assessment import ASSESSMENT_SCHEMA, MODEL_OUTPUT_SCHEMA, _structure
     from .reasoning_view import ReasoningError
 else:
-    from reasoning_assessment import ASSESSMENT_SCHEMA, _structure
+    from reasoning_assessment import ASSESSMENT_SCHEMA, MODEL_OUTPUT_SCHEMA, _structure
     from reasoning_view import ReasoningError
 
 
 MAX_SCHEMA_ERRORS = 20
 MAX_SYNTAX_SCAN_CHARS = 262_144
 FINISH_REASONS = frozenset({"stop", "length", "content_filter", "tool_calls", "function_call", "error", "cancelled"})
+MAX_RUNTIME_ERRORS = 8
+
+
+def _runtime_path(path: Any, schema: dict) -> tuple[str, dict, bool]:
+    """Keep only schema-owned property names and bounded array indices."""
+    if type(path) is not str or not path.startswith("$") or len(path) > 1024:
+        return "$", schema, True
+    safe, position, node = "$", 1, schema
+    while position < len(path):
+        token = re.match(r"(?:\.([A-Za-z_][A-Za-z0-9_]*)|\[(0|[1-9][0-9]{0,2})\])", path[position:])
+        if token is None:
+            return safe, node, True
+        key, index = token.groups()
+        if key is not None:
+            if key not in node.get("properties", {}):
+                return safe, node, True
+            node = node["properties"][key]
+            safe += "." + key
+        else:
+            if node.get("type") != "array":
+                return safe, node, True
+            node = node["items"]
+            safe += "[" + index + "]"
+        position += token.end()
+    return safe, node, False
+
+
+def runtime_schema_diagnostics(validation: Any, schema: dict = MODEL_OUTPUT_SCHEMA) -> dict:
+    """Normalize the installed runtime's documented {path,message} errors.
+
+    No arbitrary messages, unexpected property names, values or body excerpts.
+    Expected constraints come from ARGUS's own schema, not untrusted error text.
+    This is diagnostic-only and never changes response acceptance.
+    """
+    raw = validation.get("errors") if type(validation) is dict else None
+    if type(raw) is not list:
+        return {"availability": "unavailable", "errors": []}
+    errors = []
+    for item in raw[:MAX_RUNTIME_ERRORS]:
+        if type(item) is not dict:
+            errors.append({"check": "MALFORMED_RUNTIME_ERROR", "path": "$", "keyword": None})
+            continue
+        path, node, redacted = _runtime_path(item.get("path"), schema)
+        message = item.get("message")
+        code, keyword, actual_type = "RUNTIME_SCHEMA_ERROR", None, None
+        if type(message) is str and len(message) <= 256:
+            if message == "required property is missing": code, keyword = "MISSING_FIELD", "required"
+            elif message == "property is not allowed by the schema": code, keyword = "UNEXPECTED_FIELD", "additionalProperties"
+            elif re.fullmatch(r"value is not one of the [0-9]{1,4} allowed values", message): code, keyword = "ENUM", "enum"
+            elif message == "matches none of the anyOf alternatives": code, keyword = "VALUE_TYPE", "anyOf"
+            else:
+                kinds = r"(?:string|integer|number|boolean|object|array|null|undefined)"
+                match = re.fullmatch(r"expected " + kinds + r"(?: \| " + kinds + r")*, got (" + kinds + r")", message)
+                if match:
+                    code, keyword, actual_type = "TYPE", "type", match.group(1)
+        expected = {key: deepcopy(node[key]) for key in ("type", "enum") if key in node}
+        if "anyOf" in node:
+            expected["types"] = [child.get("type") for child in node["anyOf"]]
+        if keyword == "additionalProperties":
+            expected = {"additionalProperties": False} if node.get("additionalProperties") is False else {}
+        elif redacted:
+            expected = {}  # The nearest known parent is not the unknown leaf.
+        errors.append({"check": code, "path": path, "path_redacted": redacted, "keyword": keyword,
+                       "expected_from_argus_schema": expected, "actual_type": actual_type,
+                       "actual_value_status": "unavailable"})
+    return {"availability": "available", "errors": errors, "error_limit": MAX_RUNTIME_ERRORS,
+            "reported_error_count": len(raw), "errors_truncated": len(raw) > MAX_RUNTIME_ERRORS}
 
 
 def _enum_literals(schema: dict) -> set[str]:
