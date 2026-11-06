@@ -11,7 +11,7 @@ if __package__:
     from .evidence_queries import identifier
     from .reasoning_assessment import ASSESSMENT_SCHEMA, parse_assessment, strict_json
     from .reasoning_prompts import build_prompt
-    from .reasoning_providers import MockProvider, OpenAIConfig, OpenAIProvider, ReasoningProvider
+    from .reasoning_providers import MeterlessConfig, MeterlessProvider, MockProvider, OpenAIConfig, OpenAIProvider, ReasoningProvider
     from .reasoning_view import DEFAULT_VIEW_BYTES, ReasoningError, build_reasoning_view, digest
     from .zetaris_client import ROOT
 else:
@@ -19,7 +19,7 @@ else:
     from evidence_queries import identifier
     from reasoning_assessment import ASSESSMENT_SCHEMA, parse_assessment, strict_json
     from reasoning_prompts import build_prompt
-    from reasoning_providers import MockProvider, OpenAIConfig, OpenAIProvider, ReasoningProvider
+    from reasoning_providers import MeterlessConfig, MeterlessProvider, MockProvider, OpenAIConfig, OpenAIProvider, ReasoningProvider
     from reasoning_view import DEFAULT_VIEW_BYTES, ReasoningError, build_reasoning_view, digest
     from zetaris_client import ROOT
 
@@ -45,7 +45,7 @@ def artifact_paths(directory: Path, alert_id: str, provider: str, input_path: Pa
         identifier(alert_id)
     except ValueError:
         raise ReasoningError("Invalid assessment artifact identifier") from None
-    if provider not in ("mock", "openai"):
+    if provider not in ("mock", "openai", "meterless"):
         raise ReasoningError("Invalid assessment artifact provider")
     target = directory.resolve()
     if any(target.is_relative_to(ROOT / name) for name in ("data", "evaluation", ".git", "scripts", "tests", "docs", "artifacts/evidence")):
@@ -60,10 +60,10 @@ def artifact_paths(directory: Path, alert_id: str, provider: str, input_path: Pa
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("bundle", type=Path)
-    parser.add_argument("--provider", choices=("mock", "openai"), required=True,
-                        help="Explicit selection required. openai sends the evidence view to OpenAI.")
+    parser.add_argument("--provider", choices=("mock", "openai", "meterless"), required=True,
+                        help="Explicit selection required. Real providers send the view to their inference service.")
     parser.add_argument("--output-dir", type=Path, default=ROOT / "artifacts" / "assessments")
-    parser.add_argument("--env-file", type=Path, default=ROOT / ".env.local", help="Used only by openai")
+    parser.add_argument("--env-file", type=Path, default=ROOT / ".env.local", help="Used only by real providers")
     parser.add_argument("--max-view-bytes", type=int, default=DEFAULT_VIEW_BYTES)
     args = parser.parse_args(argv)
     try:
@@ -75,11 +75,20 @@ def main(argv: list[str] | None = None) -> int:
         # Validate/size-check inputs before credentials are loaded or inference runs.
         view = build_reasoning_view(bundle, max_bytes=args.max_view_bytes)
         assessment_path, view_path = artifact_paths(args.output_dir, view["alert_id"], args.provider, args.bundle)
-        config = OpenAIConfig.from_environment(args.env_file) if args.provider == "openai" else None
-        provider = OpenAIProvider(config) if config else MockProvider()
+        credential = None
+        if args.provider == "openai":
+            config = OpenAIConfig.from_environment(args.env_file)
+            provider = OpenAIProvider(config)
+            credential = config.api_key
+        elif args.provider == "meterless":
+            meterless_config = MeterlessConfig.from_environment(args.env_file)
+            provider = MeterlessProvider(meterless_config)
+            credential = meterless_config.runtime_token
+        else:
+            provider = MockProvider()
         view, result = reason_bundle(bundle, provider, max_view_bytes=args.max_view_bytes)
         payload, view_payload = serialise(result), serialise(view)
-        if config and (config.api_key in payload or config.api_key in view_payload):
+        if credential and (credential in payload or credential in view_payload):
             raise ReasoningError("Output refused because it contains a configured credential")
         assessment_path.parent.mkdir(parents=True, exist_ok=True)
         assessment_path.write_text(payload, encoding="utf-8", newline="\n")
@@ -91,6 +100,9 @@ def main(argv: list[str] | None = None) -> int:
         print("Cannot read the evidence bundle or write the assessment artifacts")
         return 1
     print(f"{'MOCK-GENERATED demonstration' if result['provider']['mock_generated'] else 'Provisional model assessment'}: {view['alert_id']}")
+    print(f"Provider: {result['provider']['name']}; model: {result['provider']['model']}")
+    if "output_mode" in result["provider"]["metadata"]:
+        print(f"Output mode: {result['provider']['metadata']['output_mode']}")
     print(f"Assessment: {assessment_path}\nReasoning view: {view_path}")
     print("Human review required; no additional evidence was retrieved or action executed.")
     return 0

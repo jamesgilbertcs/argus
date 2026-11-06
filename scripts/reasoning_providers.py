@@ -1,4 +1,4 @@
-"""Explicit mock and OpenAI Responses adapters. No provider has tool capabilities."""
+"""Explicit inference adapters. No provider has tool capabilities."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 from typing import Any, Mapping, Protocol
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 if __package__:
@@ -178,3 +179,139 @@ class OpenAIProvider:
         # private reasoning, tool payloads, or other unvalidated response content.
         metadata = {key: payload[key] for key in ("id", "usage", "service_tier") if key in payload}
         return InferenceResponse(texts[0], "openai", payload["model"], False, metadata)
+
+
+@dataclass(frozen=True)
+class MeterlessConfig:
+    base_url: str
+    runtime_token: str = field(repr=False)
+    model: str
+    timeout_seconds: float = 180
+    max_output_tokens: int = 6000
+
+    def __post_init__(self) -> None:
+        try:
+            parts = urlsplit(self.base_url)
+            valid_url = (parts.scheme in ("http", "https") and parts.hostname in ("127.0.0.1", "localhost", "::1")
+                         and parts.username is None and parts.password is None and not parts.query and not parts.fragment
+                         and parts.path.rstrip("/") in ("", "/v1") and parts.port != 0
+                         and not any(c.isspace() or ord(c) < 32 for c in self.base_url))
+            if not valid_url:
+                raise ValueError
+        except (ValueError, TypeError, AttributeError):
+            raise ProviderError("METERLESS_BASE_URL must be an HTTP(S) loopback origin, optionally ending in /v1") from None
+        object.__setattr__(self, "base_url", f"{parts.scheme}://{parts.netloc}/v1")
+        if (not isinstance(self.runtime_token, str) or not self.runtime_token or self.runtime_token.startswith("<")
+                or self.runtime_token == "rt-local" or any(not 33 <= ord(c) <= 126 for c in self.runtime_token)):
+            raise ProviderError("A valid METERLESS_RUNTIME_TOKEN is required for the meterless provider")
+        if not isinstance(self.model, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}", self.model):
+            raise ProviderError("METERLESS_MODEL must specify the exact runtime model identifier")
+        if self.runtime_token in self.base_url or self.runtime_token in self.model:
+            raise ProviderError("Invalid Meterless configuration")
+        if (type(self.timeout_seconds) not in (int, float) or not math.isfinite(self.timeout_seconds)
+                or not 1 <= self.timeout_seconds <= 600):
+            raise ProviderError("Inference timeout must be between 1 and 600 seconds")
+        if type(self.max_output_tokens) is not int or not 256 <= self.max_output_tokens <= 32_000:
+            raise ProviderError("Inference output token limit must be between 256 and 32000")
+
+    @classmethod
+    def from_environment(cls, env_file: Path = ROOT / ".env.local", *, environ: Mapping[str, str] | None = None) -> MeterlessConfig:
+        try:
+            settings = _read_settings(env_file)
+            settings.update(dict(os.environ if environ is None else environ))
+            return cls(settings.get("METERLESS_BASE_URL", ""), settings.get("METERLESS_RUNTIME_TOKEN", ""),
+                       settings.get("METERLESS_MODEL", ""), float(settings.get("ARGUS_INFERENCE_TIMEOUT_SECONDS", "180")),
+                       int(settings.get("ARGUS_MAX_OUTPUT_TOKENS", "6000")))
+        except (ZetarisError, ValueError, TypeError) as error:
+            if isinstance(error, ProviderError):
+                raise
+            raise ProviderError("Cannot load Meterless configuration") from None
+
+
+class MeterlessProvider:
+    """Nightshift chat completions with prompt-only JSON and mandatory local validation.
+
+    Structured Outputs support is unverified. The schema is supplied as trusted
+    system text; no response_format or tool API is assumed and no downgrade occurs.
+    """
+
+    MAX_RESPONSE_BYTES = 2_097_152
+    OUTPUT_MODE = "prompt_json"
+
+    def __init__(self, config: MeterlessConfig) -> None:
+        self.config = config
+        self._opener = build_opener(ProxyHandler({}), _NoRedirects())
+
+    def _request_json(self, path: str, payload: dict | None = None) -> Any:
+        body = json.dumps(payload, ensure_ascii=False) if payload is not None else None
+        if body is not None and self.config.runtime_token in body:
+            raise ProviderError("Meterless payload refused because it contains a configured credential")
+        headers = {"Authorization": "Bearer " + self.config.runtime_token, "meterless-app": "argus",
+                   "Accept": "application/json"}
+        if body is not None:
+            headers.update({"Content-Type": "application/json", "meterless-scope": "user"})
+        request = Request(self.config.base_url + path, data=body.encode("utf-8") if body is not None else None,
+                          method="POST" if body is not None else "GET", headers=headers)
+        try:
+            with self._opener.open(request, timeout=self.config.timeout_seconds) as response:
+                if response.status != 200:
+                    raise ProviderError("Meterless returned an unexpected HTTP status")
+                raw = response.read(self.MAX_RESPONSE_BYTES + 1)
+        except HTTPError as error:
+            error.close()
+            if error.code in (401, 403):
+                raise ProviderError("Meterless authentication or authorisation failed") from None
+            raise ProviderError("Meterless HTTP request failed") from None
+        except (TimeoutError, URLError, OSError, HTTPException):
+            raise ProviderError("Meterless connection failed or timed out") from None
+        if len(raw) > self.MAX_RESPONSE_BYTES:
+            raise ProviderError("Meterless response exceeds the byte limit")
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeError:
+            raise ProviderError("Meterless response is not UTF-8") from None
+        if self.config.runtime_token in text:
+            raise ProviderError("Meterless response refused because it contains a configured credential")
+        try:
+            return strict_json(text)
+        except ReasoningError:
+            raise ProviderError("Meterless returned malformed JSON") from None
+
+    def available_models(self) -> tuple[str, ...]:
+        """Explicit authenticated discovery; generate() never changes the model."""
+        payload = self._request_json("/models")
+        if (type(payload) is not dict or payload.get("object") != "list" or type(payload.get("data")) is not list
+                or any(type(row) is not dict or type(row.get("id")) is not str or not row["id"] for row in payload["data"])):
+            raise ProviderError("Unexpected Meterless model-list structure")
+        return tuple(row["id"] for row in payload["data"])
+
+    def generate(self, prompt: tuple[str, str], schema: dict) -> InferenceResponse:
+        # Reuse the engine's prompt/schema. Provider-specific framing only explains
+        # the wire mode and supplies the same schema in the absence of enforcement.
+        instructions = (prompt[0] + "\nOutput mode: prompt_json (no server-side schema enforcement). "
+                        "Return one JSON object only: no markdown fences or extra text. "
+                        "Within each object every property name must occur exactly once; duplicate keys are rejected. "
+                        "Use separate array elements for multiple findings or citations, never repeated properties. "
+                        "Use only standard JSON values, without NaN or Infinity. Keep the assessment concise. "
+                        "Match this JSON Schema exactly:\n" + json.dumps(schema, ensure_ascii=False, sort_keys=True))
+        payload = self._request_json("/chat/completions", {
+            "model": self.config.model, "messages": [{"role": "system", "content": instructions},
+                                                       {"role": "user", "content": prompt[1]}],
+            "max_tokens": self.config.max_output_tokens, "stream": False,
+        })
+        if (type(payload) is not dict or payload.get("error") is not None or payload.get("object") != "chat.completion"
+                or payload.get("model") != self.config.model or type(payload.get("choices")) is not list
+                or len(payload["choices"]) != 1 or type(payload.get("id")) is not str or not payload["id"]):
+            raise ProviderError("Meterless response has an unexpected structure or model identifier")
+        choice = payload["choices"][0]
+        if (type(choice) is not dict or type(choice.get("index")) is not int or choice["index"] != 0
+                or choice.get("finish_reason") != "stop"):
+            raise ProviderError("Meterless output did not finish successfully; expected one stopped completion")
+        message = choice.get("message")
+        if (type(message) is not dict or message.get("role") != "assistant" or type(message.get("content")) is not str
+                or not message["content"].strip() or message.get("refusal") not in (None, "")
+                or message.get("tool_calls") not in (None, []) or message.get("function_call") is not None):
+            raise ProviderError("Meterless returned no model output, refused, or requested unsupported actions")
+        metadata = {key: payload[key] for key in ("id", "created", "usage") if key in payload}
+        metadata.update({"output_mode": self.OUTPUT_MODE, "finish_reason": "stop", "requested_model": self.config.model})
+        return InferenceResponse(message["content"], "meterless", payload["model"], False, metadata)

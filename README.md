@@ -80,13 +80,21 @@ Phase 3B reasons over an **existing** bundle without querying Zetaris:
 ```sh
 python scripts/reason_evidence.py artifacts/evidence/ALT0018.json --provider mock
 python scripts/reason_evidence.py artifacts/evidence/ALT0018.json --provider openai
+python scripts/reason_evidence.py artifacts/evidence/ALT0018.json --provider meterless
 ```
 
 Provider selection is mandatory. `mock` produces a labelled, deterministic plumbing
 demonstration with no model interpretation. `openai` requires `OPENAI_API_KEY` and
 `ARGUS_OPENAI_MODEL` in the environment or ignored `.env.local` and sends the compact
-evidence view to OpenAI. It has no tools or database access. Both modes validate
+evidence view to OpenAI. It has no tools or database access. All modes validate
 structured citations and acknowledge collection limitations before writing an
 assessment and its reasoning view to `artifacts/assessments/`. Validation does not
 establish factual correctness; a human must review provisional assessments.
 See [reasoning schemas, safeguards and provider verification](docs/evidence_reasoning.md).
+
+Phase 3B.1 adds the existing local Meterless Nightshift Runtime using
+`METERLESS_BASE_URL`, `METERLESS_RUNTIME_TOKEN`, and `METERLESS_MODEL`. ARGUS needs
+no OpenAI or NVIDIA key for this provider. It uses prompt-instructed JSON chat
+completions followed by the same mandatory assessment validation. Run
+`python scripts/check_meterless.py --infer` for explicit model-discovery and small
+inference checks. See [Meterless setup and live verification](docs/evidence_reasoning.md#meterless-nightshift-provider).

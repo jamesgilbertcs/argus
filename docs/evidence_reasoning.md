@@ -50,8 +50,10 @@ check both files and their hashes after an I/O interruption.
 - `reasoning_assessment.py`: machine-readable `ASSESSMENT_SCHEMA`, strict JSON
   parser and deterministic structural/citation/coverage validation.
 - `reasoning_providers.py`: minimal `ReasoningProvider.generate(prompt, schema)`
-  interface returning `InferenceResponse`; explicit mock and OpenAI adapters.
+  interface returning `InferenceResponse`; explicit mock, OpenAI and Meterless adapters.
 - `reason_evidence.py`: orchestration, CLI and designated artifact writing.
+- `check_meterless.py`: explicit authenticated model discovery and optional small
+  inference; never part of the normal unit test run.
 
 `reason_bundle(bundle, provider)` returns `(view, result)`. The provider receives
 only the fixed prompt, serialised view and output schema. It receives no Zetaris
@@ -165,7 +167,7 @@ set by application code, not by the generated assessment. Private model reasonin
 and raw provider errors are not persisted. Mock output is labelled in its provider
 metadata, summary, filename and CLI message.
 
-## Real provider: verified protocol, no live result yet
+## OpenAI Responses provider
 
 The dependency-free OpenAI adapter implements the documented Responses REST API:
 `POST https://api.openai.com/v1/responses`, Bearer authentication, `model`, fixed
@@ -224,6 +226,173 @@ inference was attempted, and there is no verified live-model result. The supplie
 ALT0018 example is **mock-generated over an existing collected bundle**, not a new
 live Zetaris query or model investigation. Mock always returns a generic
 inconclusive demonstration and contains no planted-scenario classification logic.
+
+## Meterless Nightshift provider
+
+This adapter uses the already installed Windows runtime. No installation,
+NVIDIA configuration, routing changes or new packages are needed. The official
+[Nightshift provider contract](https://www.meterless.ai/engines.html) documents
+bearer authentication, `/v1/models`, and application/scope headers. The official
+[CLI guide](https://meterless.ai/cli.html) identifies the Windows runtime token
+file and chat-completions endpoint.
+
+Configure the following in the process environment or the existing ignored
+`.env.local`; process settings override file settings:
+
+```dotenv
+METERLESS_BASE_URL=http://127.0.0.1:8088/v1
+METERLESS_RUNTIME_TOKEN=<your-existing-runtime-token>
+METERLESS_MODEL=nvidia/nemotron-3.5-bolt-e4b
+```
+
+All three settings are required. A base URL with a bare origin or one `/v1`
+suffix (optionally followed by `/`) is accepted and normalised to `/v1` exactly
+once. Other paths, URL credentials, query strings and fragments are refused.
+Only `127.0.0.1`, `localhost` and `[::1]` hosts over HTTP(S) are supported, keeping
+runtime credentials local. Model identifiers are explicit: the previously
+observed example is not a default or a guarantee of current availability.
+Tokens are excluded from config representations and error messages; placeholder
+`rt-local` is rejected. No OpenAI key is read or required by Meterless. NVIDIA
+credentials remain under the runtime's control, outside ARGUS.
+
+To reuse the runtime-owned token in the current PowerShell session without
+printing it or editing any credential files:
+
+```powershell
+$argusPython = "$env:LOCALAPPDATA\Python\pythoncore-3.14-64\python.exe"
+$env:METERLESS_BASE_URL = 'http://127.0.0.1:8088/v1'
+$env:METERLESS_RUNTIME_TOKEN = [System.IO.File]::ReadAllText("$env:LOCALAPPDATA\ai.meterless.runtime\proxy-token").Trim()
+$env:METERLESS_MODEL = 'nvidia/nemotron-3.5-bolt-e4b'
+& $argusPython scripts/check_meterless.py --infer
+& $argusPython scripts/reason_evidence.py artifacts/evidence/ALT0018.json --provider meterless
+```
+
+The token path is the Windows runtime's documented convention. The ARGUS
+configuration loader does not automatically search for tokens or alter runtime
+files; the explicit PowerShell assignment above reads the existing token. Use
+your installed runtime's token location if it differs. `--env-file` selects a
+different literal dotenv file for either command. There is no need for Zetaris
+to be running when reasoning over an existing bundle.
+
+### Selected output mode and wire contract
+
+The installed runtime returned HTTP 404 for `/openapi.json`; neither the inspected
+official contract nor local discovery established strict Structured Outputs
+support. The adapter therefore explicitly selects **`prompt_json`**. It does not
+send `response_format`, JSON-mode flags or an assumed server-side schema grammar.
+There is no automatic downgrade after an API error. The same existing schema is
+included as trusted system text alongside the existing ARGUS instructions; the
+unchanged reasoning view is a separate user message. This adds provider-specific
+wire framing without duplicating the prompt, schema or validation logic.
+
+Chat requests are non-streaming `POST <base>/chat/completions`, containing:
+
+- `model`: the configured identifier, with no selection of fallback models.
+- `messages`: one system message (existing instructions plus schema) and one user
+  message (the existing untrusted evidence payload).
+- `max_tokens`: the bounded configured output limit; `stream`: false.
+
+Requests use `Authorization: Bearer <runtime token>` and `meterless-app: argus`.
+Chat also uses `meterless-scope: user`. No tools or function definitions are sent.
+Redirects and environment proxies are disabled. There are **no automatic retries**,
+model substitutions, provider substitutions, repair calls or mock fallback.
+
+The response must be a `chat.completion` object, with a nonempty ID, the exact
+configured model identifier, and one choice at index 0. Its `finish_reason` must
+be `stop`; `length`, `content_filter`, missing reasons and tool endings are refused
+even if some text looks like JSON. The message must be an assistant message with
+nonempty string content, no refusal and no tool/function actions. Missing output,
+HTTP errors, invalid UTF-8, malformed envelope JSON and oversized responses fail
+with credential-safe errors. HTTP 401/403 specifically indicate authentication
+or authorisation failure; timeouts/connection failures are reported separately
+from malformed responses. Raw response/error bodies are not logged or saved.
+
+Model output then passes through the unchanged strict JSON parser, assessment
+schema, source/variant citation checks and gap-coverage validation. Markdown
+fences, extra commentary, malformed assessments and fabricated citations fail;
+ARGUS does not extract a convenient JSON substring or repair a response. A valid
+assessment is still a provisional interpretation requiring human review, and
+prompt-only JSON is less reliable than server-enforced schema generation.
+
+The CLI prints the provider, model and selected output mode. Validated artifacts
+are written as `<alert_id>.meterless.assessment.json` and
+`<alert_id>.meterless.view.json` in the existing assessment directory. They are
+labelled real inference (`mock_generated=false`). Metadata includes output mode,
+finish reason, requested model, response ID, creation value and usage when
+supplied. Verbose runtime routing/cross-check blocks and private reasoning are
+not copied into artifacts. A model response naming another model is rejected;
+model aliases that resolve to a different response identifier therefore need
+explicit compatibility work rather than silent acceptance.
+
+Meterless's default timeout is **180 seconds**, configurable with the existing
+`ARGUS_INFERENCE_TIMEOUT_SECONDS` (1–600 seconds). `ARGUS_MAX_OUTPUT_TOKENS` defaults
+to 6,000 (256–32,000). The 2 MiB HTTP response limit and existing input/view limits
+remain enforced. These bound client waits/output, not upstream execution cost or
+server-side request size. A timeout does not establish that upstream work stopped;
+inspect Nightshift before manually resubmitting.
+
+`check_meterless.py` checks authenticated `/models` discovery for the exact
+configured ID; `--infer` additionally performs one small JSON request capped at
+256 output tokens. It sends no security evidence. Advertisement indicates a
+candidate model; only a successful inference shows it responded. The collector
+and reasoning CLI never invoke this checker automatically. A local runtime may
+route the configured NVIDIA model to cloud inference; a loopback endpoint does
+not imply evidence stays on the physical machine.
+
+If discovery fails, check the existing Nightshift process and port, the current
+runtime token and the configured model. Do not expose the runtime publicly or
+reinstall/reconfigure NVIDIA to address an ARGUS validation failure. If HTTP
+succeeds but assessment validation fails, retain that distinction: no validated
+assessment was produced. Adjusting generic format instructions or a token budget
+requires a deliberate new run; never weaken citation or gap checks to accept it.
+
+### Live verification performed
+
+On 2026-10-29, the existing Windows runtime answered authenticated model discovery
+and advertised `nvidia/nemotron-3.5-bolt-e4b`. A small chat request returned the
+expected JSON with `finish_reason=stop`. The `check_meterless.py --infer` command
+also passed through the implemented adapter.
+
+The existing `artifacts/evidence/ALT0018.json` bundle was then processed with the
+real Meterless adapter, existing reasoning view and unchanged assessment validator.
+A validated provisional assessment and its view were saved to:
+
+```text
+artifacts/assessments/ALT0018.meterless.assessment.json
+artifacts/assessments/ALT0018.meterless.view.json
+```
+
+Provider metadata records `meterless`, the exact NVIDIA model ID,
+`mock_generated=false`, `output_mode=prompt_json` and `finish_reason=stop`.
+Source/variant citations and required gap coverage passed local validation. This
+establishes live runtime communication and a validated assessment structure, not
+factual correctness, upstream hardware identity or an independently verified
+incident conclusion.
+
+Review of this sample found an unsupported statement: its summary describes both
+authentication source IPs as approved. The bundle's exact network check for
+`198.51.100.51` is `no_exact_match`; approved record `N003` instead contains
+`198.51.100.10`. Existing-record citations can still be attached to inaccurate
+claims, and the present validator does not check those semantic relationships.
+The model's `INCONCLUSIVE` / `MEDIUM` assessment must therefore be treated as
+unverified analyst input, not an accepted investigation result. No ground-truth
+labels were used to identify this discrepancy.
+
+Two earlier full-assessment responses failed strict JSON parsing. No assessment
+was saved for those failed runs. Generic instructions were clarified to require
+unique object properties, arrays for multiple items and standard JSON values;
+the subsequent manually initiated run passed. Validators were not relaxed, no
+JSON repair/extraction was added, and no automatic retry or output-mode/provider
+switch took place. Prompt-only schema compliance remains a known reliability
+limit. Invalid raw outputs were not retained, so their precise syntax defects
+are not asserted here.
+
+The runtime token was read from its existing file into temporary process
+configuration, never printed or written into ARGUS artifacts. No `.env.local`,
+runtime or NVIDIA credential file was modified. No ground truth was supplied and
+no follow-up evidence queries were performed. The source evidence bundle's bytes
+were unchanged by the live run. Normal automated tests use mocked HTTP and do not
+contact Nightshift, NVIDIA, OpenAI or Zetaris.
 
 ## Grounding limits and security scope
 
