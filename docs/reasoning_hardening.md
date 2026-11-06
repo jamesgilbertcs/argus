@@ -139,6 +139,11 @@ Classification, hypothesis choice and narrative require human review.
 
 ## Failure handling and local diagnostics
 
+See the [diagnostic reference and offline root-cause findings](inference_diagnostics.md)
+for bounded multi-error schema reports, parsing/termination metadata and the
+subsequently recovered original responses. The assessment schema and acceptance
+rules are unchanged.
+
 The output wrapper records four validation stages: `json_parsing`, `schema`,
 `citations_and_gaps`, and `factual_consistency`, each passed, failed or not_run.
 All must pass before writing an assessment as validated.
@@ -220,17 +225,20 @@ were made with prompt-only JSON and the 12,000-token cap:
    added and instructions clarified that the schema version is a JSON string
    and fact kinds are copied from the catalog.
 2. With the clarified instructions, strict JSON parsing failed. Schema,
-   citation/gap and factual-consistency checks were not run. No claim is made
-   about the precise syntax defect because raw output was not retained.
+   citation/gap and factual-consistency checks were not run. At that time the
+   precise syntax defect was unknown because ARGUS had not retained raw output;
+   the later offline cache investigation is documented in the diagnostic guide.
 
 Both attempts wrote only failure diagnostics under
 `artifacts/assessments/phase3b2/`; no validated assessment was written there.
 The reports have response hashes beginning `4ee630741b419404` and
 `60af0ec1bad50d99`, respectively. These are live failures, independently of the
 passing mocked tests. Neither proposed classifications/confidences nor complete
-raw model narratives were retained, so classification, confidence, recognition
+raw model narratives were retained by ARGUS, so classification, confidence, recognition
 of the VPN/shared-device explanation and remaining prose errors are **not
-verified** for a new live assessment. The old version 1.0 assessment must not be
+verified** for a new live assessment. Nightshift's own cached raw responses were
+subsequently found and used solely for offline failure analysis, without accepting
+or repairing either assessment. The old version 1.0 assessment must not be
 mistaken for the result of this evaluation.
 
 Checksums confirmed the source bundle and previous assessment were unchanged.

@@ -21,8 +21,9 @@ else:
 
 
 class JSONValidationError(ReasoningError):
-    def __init__(self, check: str, *, line: int | None = None, column: int | None = None) -> None:
-        self.details = {"check": check, "line": line, "column": column}
+    def __init__(self, check: str, *, line: int | None = None, column: int | None = None,
+                 parser_category: str | None = None) -> None:
+        self.details = {"check": check, "line": line, "column": column, "parser_category": parser_category or check}
         super().__init__("Invalid JSON input or response: " + check)
 
 
@@ -48,7 +49,14 @@ def strict_json(text: str) -> Any:
     except JSONValidationError:
         raise
     except json.JSONDecodeError as error:
-        raise JSONValidationError("SYNTAX", line=error.lineno, column=error.colno) from None
+        categories = {"Expecting value": "EXPECTED_VALUE", "Expecting property name enclosed in double quotes": "EXPECTED_PROPERTY_NAME",
+                      "Expecting ':' delimiter": "EXPECTED_COLON", "Expecting ',' delimiter": "EXPECTED_COMMA", "Extra data": "EXTRA_DATA"}
+        category = categories.get(error.msg, "SYNTAX")
+        if error.msg.startswith("Unterminated string"):
+            category = "UNTERMINATED_STRING"
+        elif error.msg.startswith("Invalid "):
+            category = "INVALID_ESCAPE_OR_CONTROL"
+        raise JSONValidationError("SYNTAX", line=error.lineno, column=error.colno, parser_category=category) from None
     except UnicodeError:
         raise JSONValidationError("ENCODING") from None
     except RecursionError:

@@ -11,6 +11,7 @@ if __package__:
     from .evidence_collector import serialise
     from .evidence_queries import identifier
     from .reasoning_assessment import ASSESSMENT_SCHEMA, strict_json, validate_assessment, validate_factual_claims, validate_structure
+    from .reasoning_diagnostics import failure_details
     from .reasoning_prompts import build_prompt
     from .reasoning_providers import MeterlessConfig, MeterlessProvider, MockProvider, OpenAIConfig, OpenAIProvider, ReasoningProvider
     from .reasoning_view import DEFAULT_VIEW_BYTES, ReasoningError, build_reasoning_view, digest
@@ -19,6 +20,7 @@ else:
     from evidence_collector import serialise
     from evidence_queries import identifier
     from reasoning_assessment import ASSESSMENT_SCHEMA, strict_json, validate_assessment, validate_factual_claims, validate_structure
+    from reasoning_diagnostics import failure_details
     from reasoning_prompts import build_prompt
     from reasoning_providers import MeterlessConfig, MeterlessProvider, MockProvider, OpenAIConfig, OpenAIProvider, ReasoningProvider
     from reasoning_view import DEFAULT_VIEW_BYTES, ReasoningError, build_reasoning_view, digest
@@ -39,6 +41,7 @@ def reason_bundle(bundle: dict, provider: ReasoningProvider, *, max_view_bytes: 
     response = provider.generate(build_prompt(view), ASSESSMENT_SCHEMA)
     stages = {name: "not_run" for name in ("json_parsing", "schema", "citations_and_gaps", "factual_consistency")}
     stage = "json_parsing"
+    assessment = None
     try:
         assessment = strict_json(response.text)
         stages[stage] = "passed"
@@ -53,10 +56,12 @@ def reason_bundle(bundle: dict, provider: ReasoningProvider, *, max_view_bytes: 
         stages[stage] = "passed"
     except ReasoningError as error:
         stages[stage] = "failed"
+        details, termination = failure_details(stage, error, response.text, response.metadata, assessment)
         report = {"schema_version": "2.0", "validated_assessment_written": False, "alert_id": view["alert_id"],
                   "bundle_sha256": view["bundle_sha256"], "reasoning_view_sha256": digest(view),
                   "provider": {"name": response.provider, "model": response.model, "mock_generated": response.mock_generated},
-                  "validation_stages": stages, "error": str(error), "details": getattr(error, "details", {}),
+                  "validation_stages": stages, "validation_stage": stage, "error": str(error), "details": details,
+                  "inference": termination,
                   "response_sha256": hashlib.sha256(response.text.encode("utf-8", errors="surrogatepass")).hexdigest() if isinstance(response.text, str) else None}
         raise ReasoningFailure(f"{stage}: {error}", report) from None
     result: dict[str, Any] = {
