@@ -10,20 +10,20 @@ if __package__:
     from .evidence_collector import serialise
     from .evidence_queries import identifier
     from .reasoning_assessment import MODEL_OUTPUT_SCHEMA, strict_json, validate_model_content, validate_factual_claims, validate_model_structure
-    from .reasoning_assembly import assemble_assessment
+    from .reasoning_assembly import VALIDATION_STAGES, assemble_assessment, validate_final_assessment
     from .reasoning_diagnostics import failure_details, inference_metadata
     from .reasoning_prompts import build_prompt
-    from .reasoning_providers import InferenceTerminationError, MeterlessConfig, MeterlessProvider, MockProvider, OpenAIConfig, OpenAIProvider, ReasoningProvider
+    from .reasoning_providers import InferenceTerminationError, StructuredOutputError, MeterlessConfig, MeterlessProvider, MockProvider, OpenAIConfig, OpenAIProvider, ReasoningProvider
     from .reasoning_view import DEFAULT_VIEW_BYTES, ReasoningError, build_reasoning_view, digest
     from .zetaris_client import ROOT
 else:
     from evidence_collector import serialise
     from evidence_queries import identifier
     from reasoning_assessment import MODEL_OUTPUT_SCHEMA, strict_json, validate_model_content, validate_factual_claims, validate_model_structure
-    from reasoning_assembly import assemble_assessment
+    from reasoning_assembly import VALIDATION_STAGES, assemble_assessment, validate_final_assessment
     from reasoning_diagnostics import failure_details, inference_metadata
     from reasoning_prompts import build_prompt
-    from reasoning_providers import InferenceTerminationError, MeterlessConfig, MeterlessProvider, MockProvider, OpenAIConfig, OpenAIProvider, ReasoningProvider
+    from reasoning_providers import InferenceTerminationError, StructuredOutputError, MeterlessConfig, MeterlessProvider, MockProvider, OpenAIConfig, OpenAIProvider, ReasoningProvider
     from reasoning_view import DEFAULT_VIEW_BYTES, ReasoningError, build_reasoning_view, digest
     from zetaris_client import ROOT
 
@@ -41,15 +41,16 @@ class ReasoningFailure(ReasoningError):
 def reason_bundle(bundle: dict, provider: ReasoningProvider, *, max_view_bytes: int = DEFAULT_VIEW_BYTES) -> tuple[dict, dict]:
     """No I/O here except the explicitly supplied inference provider."""
     view = build_reasoning_view(bundle, max_bytes=max_view_bytes)
-    stages = {name: "not_run" for name in ("json_parsing", "schema", "citations_and_gaps", "factual_consistency", "final_assembly")}
+    stages = {name: "not_run" for name in VALIDATION_STAGES}
     try:
         response = provider.generate(build_prompt(view), MODEL_OUTPUT_SCHEMA)
-    except InferenceTerminationError as error:
+    except (InferenceTerminationError, StructuredOutputError) as error:
+        stage = "provider_structured_output" if isinstance(error, StructuredOutputError) else "provider_termination"
         report = {"schema_version": "3.0", "validated_assessment_written": False, "alert_id": view["alert_id"],
                   "bundle_sha256": view["bundle_sha256"], "reasoning_view_sha256": digest(view),
                   "provider": {"name": "meterless", "model": error.model, "mock_generated": False},
-                  "validation_stages": stages, "validation_stage": "provider_termination", "error": str(error),
-                  "details": {"stage": "provider_termination", "check": "UNSUCCESSFUL_TERMINATION"},
+                  "validation_stages": stages, "validation_stage": stage, "error": str(error),
+                  "details": {"stage": stage, **(error.details if isinstance(error, StructuredOutputError) else {"check": "UNSUCCESSFUL_TERMINATION"})},
                   "inference": error.inference,
                   "response_sha256": hashlib.sha256(error.response_text.encode("utf-8", errors="surrogatepass")).hexdigest() if error.response_text is not None else None}
         raise ReasoningFailure(str(error), report, response_text=error.response_text) from None
@@ -69,6 +70,7 @@ def reason_bundle(bundle: dict, provider: ReasoningProvider, *, max_view_bytes: 
         stages[stage] = "passed"
         stage = "final_assembly"
         result = assemble_assessment(assessment, view, response)
+        validate_final_assessment(result, view)
         stages[stage] = "passed"
     except ReasoningError as error:
         stages[stage] = "failed"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 if __package__:
@@ -113,6 +114,11 @@ def inference_metadata(metadata: dict, actual_model: str) -> dict:
                    "output_mode": mode, "output_mode_status": "available" if mode else "unavailable"})
     limit = metadata.get("max_output_tokens")
     result["max_output_tokens"] = limit if type(limit) is int and 256 <= limit <= 32000 else None
+    if "meterless" in metadata:
+        # Only provider-admitted, bounded structured-output fields enter here.
+        result["meterless"] = deepcopy(metadata["meterless"])
+    if type(metadata.get("http_status")) is int:
+        result["http_status"] = metadata["http_status"]
     return result
 
 

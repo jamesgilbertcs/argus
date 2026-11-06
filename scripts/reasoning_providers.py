@@ -33,15 +33,30 @@ class InferenceTerminationError(ProviderError):
 
     def __init__(self, metadata: dict, *, model: str, max_output_tokens: int, response_text: str | None = None) -> None:
         if __package__:
-            from .reasoning_diagnostics import termination_metadata
+            from .reasoning_diagnostics import inference_metadata
         else:
-            from reasoning_diagnostics import termination_metadata
-        self.inference = termination_metadata(metadata)
+            from reasoning_diagnostics import inference_metadata
+        self.inference = inference_metadata(metadata, model)
         self.model = model
         self.response_text = response_text
         self.inference.update({"requested_model": model, "actual_model": model,
-                               "output_mode": "prompt_json", "max_output_tokens": max_output_tokens})
+                               "output_mode": "strict_json_schema", "max_output_tokens": max_output_tokens})
         super().__init__("Meterless output did not finish successfully; expected one stopped completion")
+
+
+class StructuredOutputError(ProviderError):
+    """Typed format failure; no upstream message, raw body or headers retained."""
+
+    def __init__(self, code: str, *, model: str, metadata: dict, http_status: int, actual_model: str = "") -> None:
+        if __package__:
+            from .reasoning_diagnostics import inference_metadata
+        else:
+            from reasoning_diagnostics import inference_metadata
+        self.model = model
+        self.response_text = None
+        self.details = {"check": code, "http_status": http_status}
+        self.inference = inference_metadata(metadata, actual_model)
+        super().__init__("Meterless strict structured output failed: " + code)
 
 
 @dataclass(frozen=True)
@@ -258,14 +273,17 @@ class MeterlessConfig:
 
 
 class MeterlessProvider:
-    """Nightshift chat completions with prompt-only JSON and mandatory local validation.
+    """Explicit strict JSON Schema via Nightshift, plus mandatory ARGUS validation.
 
-    Structured Outputs support is unverified. The schema is supplied as trusted
-    system text; no response_format or tool API is assumed and no downgrade occurs.
+    Verified small-schema route: Nightshift 1.2.7 / NVIDIA Nemotron Bolt E4B.
+    Other runtimes/models must support this mode; no fallback or downgrade occurs.
     """
 
     MAX_RESPONSE_BYTES = 2_097_152
-    OUTPUT_MODE = "prompt_json"
+    OUTPUT_MODE = "strict_json_schema"
+    SCHEMA_NAME = "argus_assessment"
+    STRUCTURED_ERRORS = frozenset({"structured_output_unsupported", "structured_output_schema_rejected",
+                                   "invalid_json_output", "schema_validation_failed", "response_truncated", "response_refused"})
 
     def __init__(self, config: MeterlessConfig) -> None:
         self.config = config
@@ -287,7 +305,26 @@ class MeterlessProvider:
                     raise ProviderError("Meterless returned an unexpected HTTP status")
                 raw = response.read(self.MAX_RESPONSE_BYTES + 1)
         except HTTPError as error:
-            error.close()
+            # Read only a bounded body to recognise fixed runtime error codes.
+            # Never retain upstream text, headers, arbitrary codes or schema paths.
+            code = None
+            failure_metadata = self._metadata(http_status=error.code)
+            try:
+                if error.code not in (401, 403):
+                    raw_error = error.read(self.MAX_RESPONSE_BYTES + 1)
+                    if len(raw_error) <= self.MAX_RESPONSE_BYTES and self.config.runtime_token.encode() not in raw_error:
+                        payload_error = strict_json(raw_error.decode("utf-8"))
+                        candidate = payload_error.get("error") if type(payload_error) is dict else None
+                        if type(candidate) is dict and type(candidate.get("code")) is str and candidate["code"] in self.STRUCTURED_ERRORS:
+                            code = candidate["code"]
+                            failure_metadata = self._error_metadata(payload_error, error.code, code)
+            except (ReasoningError, UnicodeError, OSError, HTTPException):
+                pass
+            finally:
+                error.close()
+            if code is not None:
+                raise StructuredOutputError(code, model=self.config.model,
+                                            metadata=failure_metadata, http_status=error.code) from None
             if error.code in (401, 403):
                 raise ProviderError("Meterless authentication or authorisation failed") from None
             raise ProviderError("Meterless HTTP request failed") from None
@@ -306,6 +343,51 @@ class MeterlessProvider:
         except ReasoningError:
             raise ProviderError("Meterless returned malformed JSON") from None
 
+    def _metadata(self, *, http_status: int, payload: dict | None = None) -> dict:
+        metadata = {key: payload[key] for key in ("id", "created", "usage") if payload is not None and key in payload}
+        metadata.update({"output_mode": self.OUTPUT_MODE, "requested_model": self.config.model,
+                         "max_output_tokens": self.config.max_output_tokens, "http_status": http_status,
+                         "meterless": {"structured_output": {"availability": "unavailable",
+                             "requested_kind": "json_schema", "requested_strict": True}}})
+        return metadata
+
+    def _error_metadata(self, payload: dict, http_status: int, code: str) -> dict:
+        metadata = self._metadata(http_status=http_status)
+        # Only the diagnostic normalizer will consume usage/termination fields;
+        # it retains known finish reasons and bounded integer token counts.
+        metadata["usage"] = payload.get("usage")
+        container = payload.get("meterless")
+        validation = container.get("validation") if type(container) is dict else None
+        if type(validation) is dict:
+            metadata["finish_reason"] = validation.get("finish_reason")
+        metadata["meterless"]["structured_output"]["reported_error_code"] = code
+        return metadata
+
+    def _structured_metadata(self, payload: dict, metadata: dict) -> None:
+        container = payload.get("meterless")
+        if container is None:
+            return
+        if type(container) is not dict:
+            raise StructuredOutputError("INVALID_STRUCTURED_METADATA", model=self.config.model, metadata=metadata,
+                                        http_status=200, actual_model=self.config.model)
+        raw = container.get("structured_output")
+        if raw is None:
+            return
+        if (type(raw) is not dict or raw.get("kind") != "json_schema" or raw.get("strict") is not True
+                or raw.get("validation") != "passed" or raw.get("capability") not in (None, "unverified", "verified")
+                or raw.get("name") not in (None, self.SCHEMA_NAME)
+                or "schema_fingerprint" in raw and (type(raw["schema_fingerprint"]) is not str
+                    or re.fullmatch(r"[0-9a-f]{16}", raw["schema_fingerprint"]) is None)):
+            raise StructuredOutputError("INVALID_OR_REJECTED_STRUCTURED_METADATA", model=self.config.model,
+                                        metadata=metadata, http_status=200, actual_model=self.config.model)
+        keys = {"kind", "strict", "validation", "capability", "name", "schema_fingerprint"}
+        admitted = {key: raw[key] for key in sorted(keys) if key in raw}
+        admitted["availability"] = "available"
+        admitted.update({"requested_kind": "json_schema", "requested_strict": True})
+        if raw.keys() - keys:
+            admitted["omitted_field_count"] = len(raw.keys() - keys)
+        metadata["meterless"]["structured_output"] = admitted
+
     def available_models(self) -> tuple[str, ...]:
         """Explicit authenticated discovery; generate() never changes the model."""
         payload = self._request_json("/models")
@@ -315,19 +397,25 @@ class MeterlessProvider:
         return tuple(row["id"] for row in payload["data"])
 
     def generate(self, prompt: tuple[str, str], schema: dict) -> InferenceResponse:
-        # Reuse the engine's prompt/schema. Provider-specific framing only explains
-        # the wire mode and supplies the same schema in the absence of enforcement.
-        instructions = (prompt[0] + "\nOutput mode: prompt_json (no server-side schema enforcement). "
+        # The contract is the same object used by independent ARGUS validation.
+        # Do not duplicate it in the prompt or downgrade after an API rejection.
+        instructions = (prompt[0] + "\nOutput mode: strict_json_schema. "
                         "Return one JSON object only: no markdown fences or extra text. "
                         "Within each object every property name must occur exactly once; duplicate keys are rejected. "
                         "Use separate array elements for multiple findings or citations, never repeated properties. "
                         "Use only standard JSON values, without NaN or Infinity. Keep the assessment concise. "
-                        "Match this JSON Schema exactly:\n" + json.dumps(schema, ensure_ascii=False, sort_keys=True))
+                        "Match the response_format JSON Schema exactly; ARGUS independently validates the result.")
         payload = self._request_json("/chat/completions", {
             "model": self.config.model, "messages": [{"role": "system", "content": instructions},
                                                        {"role": "user", "content": prompt[1]}],
             "max_tokens": self.config.max_output_tokens, "stream": False,
+            "response_format": {"type": "json_schema", "json_schema": {
+                "name": self.SCHEMA_NAME, "strict": True, "schema": schema}},
         })
+        error = payload.get("error") if type(payload) is dict else None
+        if type(error) is dict and type(error.get("code")) is str and error["code"] in self.STRUCTURED_ERRORS:
+            raise StructuredOutputError(error["code"], model=self.config.model,
+                                        metadata=self._error_metadata(payload, 200, error["code"]), http_status=200)
         if (type(payload) is not dict or payload.get("error") is not None or payload.get("object") != "chat.completion"
                 or payload.get("model") != self.config.model or type(payload.get("choices")) is not list
                 or len(payload["choices"]) != 1 or type(payload.get("id")) is not str or not payload["id"]):
@@ -335,10 +423,13 @@ class MeterlessProvider:
         choice = payload["choices"][0]
         if type(choice) is not dict or type(choice.get("index")) is not int or choice["index"] != 0:
             raise ProviderError("Meterless output did not finish successfully; expected one stopped completion")
+        metadata = self._metadata(http_status=200, payload=payload)
+        metadata["finish_reason"] = choice.get("finish_reason")
+        self._structured_metadata(payload, metadata)
         if choice.get("finish_reason") != "stop":
             message = choice.get("message")
             text = message.get("content") if type(message) is dict and message.get("role") == "assistant" else None
-            raise InferenceTerminationError({"finish_reason": choice.get("finish_reason"), "usage": payload.get("usage")},
+            raise InferenceTerminationError(metadata,
                                             model=self.config.model, max_output_tokens=self.config.max_output_tokens,
                                             response_text=text if type(text) is str else None)
         message = choice.get("message")
@@ -346,7 +437,4 @@ class MeterlessProvider:
                 or not message["content"].strip() or message.get("refusal") not in (None, "")
                 or message.get("tool_calls") not in (None, []) or message.get("function_call") is not None):
             raise ProviderError("Meterless returned no model output, refused, or requested unsupported actions")
-        metadata = {key: payload[key] for key in ("id", "created", "usage") if key in payload}
-        metadata.update({"output_mode": self.OUTPUT_MODE, "finish_reason": choice["finish_reason"],
-                         "requested_model": self.config.model, "max_output_tokens": self.config.max_output_tokens})
         return InferenceResponse(message["content"], "meterless", payload["model"], False, metadata)

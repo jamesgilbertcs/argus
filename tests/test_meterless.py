@@ -136,15 +136,16 @@ class MeterlessProviderTests(unittest.TestCase):
         self.assertEqual(body["max_tokens"], 6000)
         self.assertFalse(body["stream"])
         self.assertTrue(body["messages"][0]["content"].startswith(SYSTEM_PROMPT))
-        self.assertEqual(json.loads(body["messages"][0]["content"].split("Match this JSON Schema exactly:\n")[1]), ASSESSMENT_SCHEMA)
+        self.assertEqual(body["response_format"], {"type": "json_schema", "json_schema": {
+            "name": "argus_assessment", "strict": True, "schema": ASSESSMENT_SCHEMA}})
         self.assertEqual(body["messages"][1], {"role": "user", "content": build_prompt(self.view)[1]})
-        self.assertNotIn("response_format", body)
+        self.assertIn("strict_json_schema", body["messages"][0]["content"])
         self.assertNotIn("tools", body)
         self.assertEqual(self.opener.open.call_args.kwargs["timeout"], 180)
         self.assertEqual(reply.provider, "meterless")
         self.assertEqual(reply.model, MODEL)
         self.assertFalse(reply.mock_generated)
-        self.assertEqual(reply.metadata["output_mode"], "prompt_json")
+        self.assertEqual(reply.metadata["output_mode"], "strict_json_schema")
 
     def test_existing_assessment_pipeline_validates_and_keeps_source_identifiers(self):
         self.serve(self.response())
@@ -294,7 +295,7 @@ class MeterlessCLITests(unittest.TestCase):
             self.assertEqual(result["provider"]["name"], "meterless")
             self.assertFalse(result["provider"]["mock_generated"])
             self.assertIn(MODEL, output.getvalue())
-            self.assertIn("prompt_json", output.getvalue())
+            self.assertIn("strict_json_schema", output.getvalue())
             self.assertNotIn(TOKEN, output.getvalue())
             self.assertNotIn(TOKEN, serialise(result))
             self.assertEqual(source.read_text(encoding="utf-8"), original)

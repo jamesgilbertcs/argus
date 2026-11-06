@@ -40,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(f"Meterless authenticated model discovery passed; model: {config.model}")
     if args.infer:
-        print("Small real inference passed; finish_reason=stop; output_mode=prompt_json")
+        print(f"Small real inference passed; finish_reason=stop; output_mode={MeterlessProvider.OUTPUT_MODE}")
     print("This checks connectivity and inference only; no security investigation was performed.")
     return 0
 

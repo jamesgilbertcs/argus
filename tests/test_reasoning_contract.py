@@ -294,17 +294,16 @@ class ProviderContractTests(unittest.TestCase):
         self.assertEqual(result["inference"]["completion_tokens"], 100)
         self.assertIsNone(result["inference"]["finish_reason"])
 
-    def test_meterless_uses_new_schema_without_changing_output_mode(self):
+    def test_meterless_uses_new_schema_in_explicit_strict_output_mode(self):
         provider = MeterlessProvider(MeterlessConfig("http://localhost:8088/v1", "fixture-runtime-secret", "configured-model"))
         opener = serve(provider, {"id": "chat_fixture", "object": "chat.completion", "model": "configured-model",
                                   "choices": [{"index": 0, "finish_reason": "stop", "message": {
                                       "role": "assistant", "content": json.dumps(self.content)}}], "usage": {"completion_tokens": 100}})
         result = reason_bundle(self.bundle, provider)[1]
         body = json.loads(opener.open.call_args.args[0].data)
-        schema = json.loads(body["messages"][0]["content"].split("Match this JSON Schema exactly:\n")[1])
-        self.assertEqual(schema, MODEL_OUTPUT_SCHEMA)
-        self.assertNotIn("response_format", body)
-        self.assertEqual(result["inference"]["output_mode"], "prompt_json")
+        self.assertEqual(body["response_format"], {"type": "json_schema", "json_schema": {
+            "name": "argus_assessment", "strict": True, "schema": MODEL_OUTPUT_SCHEMA}})
+        self.assertEqual(result["inference"]["output_mode"], "strict_json_schema")
         self.assertEqual(result["inference"]["finish_reason"], "stop")
 
     def test_unsuccessful_or_missing_termination_keeps_safe_diagnostics(self):

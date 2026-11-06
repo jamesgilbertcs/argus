@@ -6,6 +6,10 @@ ARGUS-generated collection metadata and deterministic relationships. See the
 completeness policy, validation and migration. The version 1.0/2.0 sections below
 describe historical contracts and unchanged provider protocols.
 
+Current Meterless inference uses [strict JSON Schema](meterless_strict_output.md)
+with mandatory independent validation, including the assembled final artifact.
+The prompt-only Meterless description below records the historical integration.
+
 This phase interprets an existing Phase 3A JSON bundle. It never queries Zetaris,
 reads local operational CSVs, reads evaluation answers, executes suggested actions,
 or asks a model to retrieve evidence. Collection and reasoning remain separate.

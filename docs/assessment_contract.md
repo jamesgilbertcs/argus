@@ -1,5 +1,10 @@
 # Phase 3B.3: interpretation and deterministic assessment assembly
 
+The contract below remains current. [Phase 3B.4](meterless_strict_output.md) now
+uses explicit strict JSON Schema for Meterless and independently validates the
+final artifact. References to `prompt_json` in historical verification describe
+the earlier implementation, not the current Meterless request mode.
+
 New inference uses the **interpretation_v1** model contract and writes **3.0**
 assessment wrappers/final assessments. Source bundles remain **1.0** and reasoning
 views remain **2.0**, byte-for-byte unchanged for the same bundle. No evidence,
@@ -27,8 +32,8 @@ relationships or collection limitations. Returning these unsupported properties
 fails validation; ARGUS never strips them to obtain an acceptable response.
 
 The supplied schema and revised system instructions are shared by mock, OpenAI
-and Meterless providers. OpenAI still requests strict JSON-schema output;
-Meterless still uses `prompt_json`, without assuming server-side enforcement.
+and Meterless providers. OpenAI retains its strict Responses format; Meterless
+now explicitly requests the verified chat-completions strict JSON Schema format.
 The mock remains explicitly labelled and contains no incident-classification logic.
 
 ## Facts and citations

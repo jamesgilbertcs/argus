@@ -94,8 +94,8 @@ See [reasoning schemas, safeguards and provider verification](docs/evidence_reas
 
 Phase 3B.1 adds the existing local Meterless Nightshift Runtime using
 `METERLESS_BASE_URL`, `METERLESS_RUNTIME_TOKEN`, and `METERLESS_MODEL`. ARGUS needs
-no OpenAI or NVIDIA key for this provider. It uses prompt-instructed JSON chat
-completions followed by the same mandatory assessment validation. Run
+no OpenAI or NVIDIA key for this provider. Current inference uses explicit strict
+JSON Schema chat completions followed by mandatory independent validation. Run
 `python scripts/check_meterless.py --infer` for explicit model-discovery and small
 inference checks. See [Meterless setup and live verification](docs/evidence_reasoning.md#meterless-nightshift-provider).
 
@@ -111,3 +111,7 @@ assembly (schema 3.0). ARGUS supplies collection completeness, every limitation,
 source provenance and verified relationships; model factual assertions retain
 exact contradiction checks. Historical validators remain available. See the
 [current assessment contract and migration](docs/assessment_contract.md).
+
+Phase 3B.4 integrates Meterless strict `response_format.json_schema` without
+fallback, and validates the complete assembled schema 3.0 artifact. See
+[strict-output requests, diagnostics and verification](docs/meterless_strict_output.md).
