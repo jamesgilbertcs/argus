@@ -31,7 +31,7 @@ def _enum_literals(schema: dict) -> set[str]:
 SAFE_ENUM_LITERALS = frozenset(_enum_literals(ASSESSMENT_SCHEMA))
 
 
-def schema_errors(value: Any) -> dict:
+def schema_errors(value: Any, schema: dict = ASSESSMENT_SCHEMA) -> dict:
     """Collect up to 20 errors using the existing validator as the authority.
 
     Only schema-owned property names enter paths. Unexpected model-owned names
@@ -85,7 +85,7 @@ def schema_errors(value: Any) -> dict:
                 expected = {"max_depth": 20} if depth > 20 else {"nonempty": True, "max_characters": 6000}
             add(check, path, expected, actual)
 
-    visit(value, ASSESSMENT_SCHEMA, "assessment", 0)
+    visit(value, schema, "assessment", 0)
     return {"errors": errors[:MAX_SCHEMA_ERRORS], "error_limit": MAX_SCHEMA_ERRORS,
             "errors_truncated": len(errors) > MAX_SCHEMA_ERRORS}
 
@@ -101,6 +101,19 @@ def termination_metadata(metadata: Any) -> dict:
             "finish_reason_status": "available" if safe_finish is not None else "unavailable" if finish is None else "redacted_invalid",
             "completion_tokens": safe_count,
             "completion_tokens_status": "available" if safe_count is not None else "unavailable" if count is None else "redacted_invalid"}
+
+
+def inference_metadata(metadata: dict, actual_model: str) -> dict:
+    """Operational fields from provider-admitted metadata, never raw output."""
+    result = termination_metadata(metadata)
+    requested = metadata.get("requested_model")
+    mode = metadata.get("output_mode")
+    result.update({"requested_model": requested, "requested_model_status": "available" if requested else "unavailable",
+                   "actual_model": actual_model or None, "actual_model_status": "available" if actual_model else "unavailable",
+                   "output_mode": mode, "output_mode_status": "available" if mode else "unavailable"})
+    limit = metadata.get("max_output_tokens")
+    result["max_output_tokens"] = limit if type(limit) is int and 256 <= limit <= 32000 else None
+    return result
 
 
 def json_response_details(text: Any, termination: dict) -> dict:
@@ -141,12 +154,13 @@ def json_response_details(text: Any, termination: dict) -> dict:
             "syntax_scan_limited": scan_limited, "syntax_scan_character_limit": MAX_SYNTAX_SCAN_CHARS}
 
 
-def failure_details(stage: str, error: ReasoningError, text: Any, metadata: Any, assessment: Any) -> tuple[dict, dict]:
+def failure_details(stage: str, error: ReasoningError, text: Any, metadata: Any, assessment: Any,
+                    *, schema: dict = ASSESSMENT_SCHEMA) -> tuple[dict, dict]:
     details = dict(getattr(error, "details", {}))
     details["stage"] = stage
     termination = termination_metadata(metadata)
     if stage == "schema":
-        details.update(schema_errors(assessment))
+        details.update(schema_errors(assessment, schema))
     if stage == "json_parsing":
         details.update(json_response_details(text, termination))
     return details, termination

@@ -14,7 +14,7 @@ from scripts.evidence_collector import serialise
 from scripts.reason_evidence import ReasoningFailure, main, reason_bundle
 from scripts.reasoning_assessment import ASSESSMENT_SCHEMA, validate_structure
 from scripts.reasoning_diagnostics import MAX_SCHEMA_ERRORS, MAX_SYNTAX_SCAN_CHARS, schema_errors
-from scripts.reasoning_providers import InferenceResponse
+from scripts.reasoning_providers import InferenceResponse, MockProvider
 from scripts.reasoning_view import ReasoningError, build_reasoning_view
 from tests.test_reasoning import fixture, valid_assessment
 
@@ -25,6 +25,10 @@ class DiagnosticTests(unittest.TestCase):
         self.valid = valid_assessment(build_reasoning_view(self.bundle))
 
     def failure(self, value, metadata=None, *, raw=False):
+        # These fixtures also exercise the archived v2 validator. For the new
+        # inference pipeline, remove only its four ARGUS-owned metadata fields.
+        if not raw:
+            value = {k: v for k, v in value.items() if k not in {"schema_version", "alert_id", "collection_status", "evidence_complete"}}
         provider = Mock()
         provider.generate.return_value = InferenceResponse(value if raw else json.dumps(value), "mock", "test", True, metadata or {})
         with self.assertRaises(ReasoningFailure) as caught:
@@ -34,13 +38,14 @@ class DiagnosticTests(unittest.TestCase):
 
     def test_original_first_failure_true_complete_is_precise_and_safe(self):
         self.valid["evidence_complete"] = True
-        report = self.failure(self.valid)
-        self.assertEqual(report["validation_stage"], "schema")
-        self.assertEqual(report["details"]["errors"], [{"stage": "schema", "check": "ENUM", "path": "assessment.evidence_complete",
+        with self.assertRaises(ReasoningError):
+            validate_structure(self.valid)
+        self.assertEqual(schema_errors(self.valid)["errors"], [{"stage": "schema", "check": "ENUM", "path": "assessment.evidence_complete",
                                                         "expected": [False], "actual_type": "bool", "actual_value": True}])
-        self.assertEqual(report["validation_stages"]["json_parsing"], "passed")
-        self.assertEqual(report["validation_stages"]["factual_consistency"], "not_run")
-        self.assertFalse(report["validated_assessment_written"])
+        # New inference never asks the model to reproduce this deterministic flag.
+        _, result = reason_bundle(self.bundle, MockProvider())
+        self.assertFalse(result["assessment"]["evidence_complete"])
+        self.assertTrue(all(s == "passed" for s in result["validation_stages"].values()))
 
     def test_original_second_failure_unclosed_unknowns_at_eof(self):
         raw = '{"unknowns":[{"description":"bounded","gap_ids":[]}'

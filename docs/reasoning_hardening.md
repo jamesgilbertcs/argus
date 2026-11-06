@@ -1,5 +1,11 @@
 # Phase 3B.2: deterministic relationships and factual consistency
 
+This documents the historical **2.0** output contract. New inference uses
+[Phase 3B.3 interpretation and final assembly](assessment_contract.md). The
+relationship derivation and exact claim consistency checks below remain in use;
+mandatory model copying of metadata, all gaps and referenced facts is replaced
+by deterministic assembly. Historical validation remains unchanged.
+
 This extends the existing reasoning pipeline without retrieval, scenario-specific
 conclusions or new dependencies. The collector and version 1.0 source bundles
 remain unchanged. Production reasoning reads only the supplied bundle; regression

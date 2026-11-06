@@ -1,5 +1,11 @@
 # Inference failure diagnostics
 
+The original implementation and offline findings below refer to schema 2.0.
+Current [Phase 3B.3](assessment_contract.md) diagnostics use the model-facing
+interpretation schema, add `final_assembly`, and retain bounded metadata for
+rejected Meterless termination. Raw output retention is still off by default;
+the new CLI flag explicitly opts into local failure-text retention.
+
 This diagnostic-only extension changes neither assessment schema 2.0 nor its
 acceptance rules. The existing validator still decides whether to reject a
 response. Prompt construction, provider selection, inference requests and retry

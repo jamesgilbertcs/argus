@@ -21,7 +21,7 @@ from scripts.reasoning_providers import InferenceResponse, MockProvider
 from scripts.reasoning_view import ReasoningError, build_reasoning_view, digest
 from scripts.zetaris_client import ROOT
 from tests.test_evidence_collection import MockZetaris
-from tests.test_reasoning import citation, envelope, fixture, valid_assessment
+from tests.test_reasoning import citation, envelope, fixture, model_content, valid_assessment
 
 
 def generic_bundle() -> dict:
@@ -215,7 +215,7 @@ class ClaimTests(unittest.TestCase):
 
     def test_failed_assessment_creates_only_safe_failure_report(self):
         self.assessment["factual_claims"][0]["value"] = "secret-reflected-by-model"
-        reply = InferenceResponse(json.dumps(self.assessment), "mock", "unit-test", True)
+        reply = InferenceResponse(json.dumps(model_content(self.assessment)), "mock", "unit-test", True)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / "bundle.json"
@@ -238,7 +238,7 @@ class ClaimTests(unittest.TestCase):
             value = copy.deepcopy(self.assessment)
             if payload == "citation":
                 value["supporting_evidence"][0]["id"] = "MISSING"
-                payload = json.dumps(value)
+                payload = json.dumps(model_content(value))
             provider = Mock()
             provider.generate.return_value = InferenceResponse(payload, "mock", "test", True)
             with self.subTest(stage=stage), self.assertRaises(ReasoningFailure) as caught:
@@ -249,7 +249,7 @@ class ClaimTests(unittest.TestCase):
         value = copy.deepcopy(self.assessment)
         value["factual_claims"][0]["kind"] = "secret-like-invalid-enum"
         provider = Mock()
-        provider.generate.return_value = InferenceResponse(json.dumps(value), "mock", "test", True)
+        provider.generate.return_value = InferenceResponse(json.dumps(model_content(value)), "mock", "test", True)
         with self.assertRaises(ReasoningFailure) as caught: reason_bundle(generic_bundle(), provider)
         report = caught.exception.report
         self.assertEqual(report["details"]["path"], "assessment.factual_claims[0].kind")

@@ -41,15 +41,21 @@ Use reported-device relationships: equal identifiers do not prove a single
 physical device or an authorised operator. Check session owner/IP/time comparisons
 and resource context. Do not turn absent bounded activity into proof of absence.
 
-schema_version must be the JSON STRING "2.0", never a number. factual_claims entries
-have exactly fact_id, kind, value, evidence. Their kind is copied from the fact
-catalog; do not use OBSERVED_FACT or INTERPRETATION as factual_claims.kind.
-factual_claims must include every
-relationships.required_fact_ids entry exactly once. Copy fact_id, kind, value and
-the complete evidence array from the corresponding relationships.facts entry.
-The factual claims are checkable observations, not classifications or conclusions.
-You may also cite optional facts in factual_claims. Do not alter a fact's values,
-replace its citations, or invent facts. Signed time deltas are SECOND minus FIRST
+Return investigative interpretation only. ARGUS supplies alert ID, schema version,
+collection status, completeness, all collection limitations, provenance and the
+entire deterministic relationship catalog after validation. Do not output those
+metadata fields. Do not repeat the catalog solely to satisfy formatting.
+For checkable assertions you use in your findings or summary, include the relevant
+factual_claims entries (exactly fact_id, kind, value, evidence). Select facts from
+relationships.facts; do not invent facts or confuse factual_claims.kind with
+OBSERVED_FACT or INTERPRETATION. Do not repeat unused catalog facts. The catalog's
+required_fact_ids/required flags describe historical version 2.0 copying policy,
+not this interpretation contract. An empty claims array is allowed if no supported
+checkable assertions are made. All supplied claims are strictly verified.
+Copy each selected fact's kind, exact value and complete evidence citations;
+contradictory claims fail validation, rather than being corrected by ARGUS.
+These claims are observations, not classifications or conclusions.
+Signed time deltas are SECOND minus FIRST
 in exact integer MICROSECONDS; null means unverified, not zero. Null shared-device
 values can mean missing identifiers: inspect device_status before interpreting.
 Keep all prose consistent with these claims, including the executive summary.
@@ -65,11 +71,13 @@ are for interpretation; variant IDs identify original encoded source records.
 Keep nulls, exact integers, tagged decimals and original timestamps meaningful;
 use timestamp_interpretation only when supplied, without inventing a timezone.
 
-Report collection_status exactly as supplied. evidence_complete must be false:
-even successful collection is bounded. unknowns must acknowledge EVERY gaps[].gap_id
-using gap_ids and meaningful descriptions of the limitations, including missing,
-unresolved, conflicting, unavailable or potentially truncated data. Additional
-analyst unknowns may use an empty gap_ids list. Never equate an empty history
+Do not regenerate collection_status or evidence_complete. Successful collection,
+completeness within its scope, and sufficient evidence to resolve an investigation
+are different. ARGUS preserves EVERY collection gap independently of your output.
+Use unknowns for investigative uncertainties and explain material limitations;
+gap_ids may cite supplied gaps where relevant, or be empty for analyst unknowns.
+Never invent a gap ID or claim incomplete evidence is exhaustive.
+Never equate an empty history
 with proof that no activity occurred. If the alert record is absent, classification
 must be INCONCLUSIVE and confidence LOW. Include plausible alternatives and human
 investigative next steps. Do not suggest that suggested steps have been executed.

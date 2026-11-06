@@ -5,73 +5,84 @@ from __future__ import annotations
 import argparse
 import hashlib
 from pathlib import Path
-from typing import Any
 
 if __package__:
     from .evidence_collector import serialise
     from .evidence_queries import identifier
-    from .reasoning_assessment import ASSESSMENT_SCHEMA, strict_json, validate_assessment, validate_factual_claims, validate_structure
-    from .reasoning_diagnostics import failure_details
+    from .reasoning_assessment import MODEL_OUTPUT_SCHEMA, strict_json, validate_model_content, validate_factual_claims, validate_model_structure
+    from .reasoning_assembly import assemble_assessment
+    from .reasoning_diagnostics import failure_details, inference_metadata
     from .reasoning_prompts import build_prompt
-    from .reasoning_providers import MeterlessConfig, MeterlessProvider, MockProvider, OpenAIConfig, OpenAIProvider, ReasoningProvider
+    from .reasoning_providers import InferenceTerminationError, MeterlessConfig, MeterlessProvider, MockProvider, OpenAIConfig, OpenAIProvider, ReasoningProvider
     from .reasoning_view import DEFAULT_VIEW_BYTES, ReasoningError, build_reasoning_view, digest
     from .zetaris_client import ROOT
 else:
     from evidence_collector import serialise
     from evidence_queries import identifier
-    from reasoning_assessment import ASSESSMENT_SCHEMA, strict_json, validate_assessment, validate_factual_claims, validate_structure
-    from reasoning_diagnostics import failure_details
+    from reasoning_assessment import MODEL_OUTPUT_SCHEMA, strict_json, validate_model_content, validate_factual_claims, validate_model_structure
+    from reasoning_assembly import assemble_assessment
+    from reasoning_diagnostics import failure_details, inference_metadata
     from reasoning_prompts import build_prompt
-    from reasoning_providers import MeterlessConfig, MeterlessProvider, MockProvider, OpenAIConfig, OpenAIProvider, ReasoningProvider
+    from reasoning_providers import InferenceTerminationError, MeterlessConfig, MeterlessProvider, MockProvider, OpenAIConfig, OpenAIProvider, ReasoningProvider
     from reasoning_view import DEFAULT_VIEW_BYTES, ReasoningError, build_reasoning_view, digest
     from zetaris_client import ROOT
 
 
 class ReasoningFailure(ReasoningError):
-    """Failed validation with bounded diagnostics, never the raw model response."""
+    """Bounded diagnostic report; optional raw text is excluded from repr/str."""
 
-    def __init__(self, message: str, report: dict) -> None:
+    def __init__(self, message: str, report: dict, *, response_text: str | None = None) -> None:
         self.report = report
+        # Never included in repr/str/report. CLI retention requires explicit opt-in.
+        self.response_text = response_text
         super().__init__(message)
 
 
 def reason_bundle(bundle: dict, provider: ReasoningProvider, *, max_view_bytes: int = DEFAULT_VIEW_BYTES) -> tuple[dict, dict]:
     """No I/O here except the explicitly supplied inference provider."""
     view = build_reasoning_view(bundle, max_bytes=max_view_bytes)
-    response = provider.generate(build_prompt(view), ASSESSMENT_SCHEMA)
-    stages = {name: "not_run" for name in ("json_parsing", "schema", "citations_and_gaps", "factual_consistency")}
+    stages = {name: "not_run" for name in ("json_parsing", "schema", "citations_and_gaps", "factual_consistency", "final_assembly")}
+    try:
+        response = provider.generate(build_prompt(view), MODEL_OUTPUT_SCHEMA)
+    except InferenceTerminationError as error:
+        report = {"schema_version": "3.0", "validated_assessment_written": False, "alert_id": view["alert_id"],
+                  "bundle_sha256": view["bundle_sha256"], "reasoning_view_sha256": digest(view),
+                  "provider": {"name": "meterless", "model": error.model, "mock_generated": False},
+                  "validation_stages": stages, "validation_stage": "provider_termination", "error": str(error),
+                  "details": {"stage": "provider_termination", "check": "UNSUCCESSFUL_TERMINATION"},
+                  "inference": error.inference,
+                  "response_sha256": hashlib.sha256(error.response_text.encode("utf-8", errors="surrogatepass")).hexdigest() if error.response_text is not None else None}
+        raise ReasoningFailure(str(error), report, response_text=error.response_text) from None
     stage = "json_parsing"
     assessment = None
     try:
         assessment = strict_json(response.text)
         stages[stage] = "passed"
         stage = "schema"
-        validate_structure(assessment)
+        validate_model_structure(assessment)
         stages[stage] = "passed"
         stage = "citations_and_gaps"
-        validate_assessment(assessment, view, check_facts=False)
+        validate_model_content(assessment, view, check_facts=False)
         stages[stage] = "passed"
         stage = "factual_consistency"
-        validate_factual_claims(assessment, view)
+        validate_factual_claims(assessment, view, require_coverage=False)
+        stages[stage] = "passed"
+        stage = "final_assembly"
+        result = assemble_assessment(assessment, view, response)
         stages[stage] = "passed"
     except ReasoningError as error:
         stages[stage] = "failed"
-        details, termination = failure_details(stage, error, response.text, response.metadata, assessment)
-        report = {"schema_version": "2.0", "validated_assessment_written": False, "alert_id": view["alert_id"],
+        details, termination = failure_details(stage, error, response.text, response.metadata, assessment, schema=MODEL_OUTPUT_SCHEMA)
+        termination.update(inference_metadata(response.metadata, response.model))
+        report = {"schema_version": "3.0", "validated_assessment_written": False, "alert_id": view["alert_id"],
                   "bundle_sha256": view["bundle_sha256"], "reasoning_view_sha256": digest(view),
                   "provider": {"name": response.provider, "model": response.model, "mock_generated": response.mock_generated},
                   "validation_stages": stages, "validation_stage": stage, "error": str(error), "details": details,
                   "inference": termination,
                   "response_sha256": hashlib.sha256(response.text.encode("utf-8", errors="surrogatepass")).hexdigest() if isinstance(response.text, str) else None}
-        raise ReasoningFailure(f"{stage}: {error}", report) from None
-    result: dict[str, Any] = {
-        "schema_version": "2.0", "bundle_sha256": view["bundle_sha256"], "reasoning_view_sha256": digest(view),
-        "provider": {"name": response.provider, "model": response.model, "mock_generated": response.mock_generated,
-                     "metadata": response.metadata},
-        "validation": "Structure, citation membership, gap coverage and supported structured facts checked; prose and conclusions need human review.",
-        "validation_stages": stages,
-        "assessment": assessment,
-    }
+        raise ReasoningFailure(f"{stage}: {error}", report,
+                               response_text=response.text if type(response.text) is str else None) from None
+    result["validation_stages"] = stages
     return view, result
 
 
@@ -102,6 +113,13 @@ def failure_path(directory: Path, report: dict, input_path: Path) -> Path:
     return target
 
 
+def failure_response_path(diagnostic_path: Path, input_path: Path) -> Path:
+    target = diagnostic_path.with_suffix(".response.txt")
+    if target.is_symlink() or (target.exists() and target.stat().st_nlink > 1) or target.resolve() == input_path.resolve():
+        raise ReasoningError("Failed response cannot overwrite the evidence or follow linked files")
+    return target
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("bundle", type=Path)
@@ -110,6 +128,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-dir", type=Path, default=ROOT / "artifacts" / "assessments")
     parser.add_argument("--env-file", type=Path, default=ROOT / ".env.local", help="Used only by real providers")
     parser.add_argument("--max-view-bytes", type=int, default=DEFAULT_VIEW_BYTES)
+    parser.add_argument("--retain-failed-response", action="store_true",
+                        help="Opt in to retaining untrusted model text locally beside failure diagnostics; never printed")
     args = parser.parse_args(argv)
     try:
         with args.bundle.open("rb") as handle:
@@ -135,11 +155,18 @@ def main(argv: list[str] | None = None) -> int:
             view, result = reason_bundle(bundle, provider, max_view_bytes=args.max_view_bytes)
         except ReasoningFailure as error:
             diagnostic = serialise(error.report)
-            if credential and credential in diagnostic:
+            raw_failure = error.response_text if args.retain_failed_response else None
+            if credential and (credential in diagnostic or raw_failure is not None and credential in raw_failure):
                 raise ReasoningError("Failure diagnostic refused because it contains a configured credential") from None
             target = failure_path(args.output_dir, error.report, args.bundle)
+            raw_target = failure_response_path(target, args.bundle) if raw_failure is not None else None
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(diagnostic, encoding="utf-8", newline="\n")
+            if raw_target is not None:
+                # backslashreplace preserves malformed surrogate output safely;
+                # the diagnostic hash always describes the original response.
+                raw_target.write_bytes(raw_failure.encode("utf-8", errors="backslashreplace"))
+                print(f"Untrusted failed response retained locally: {raw_target}")
             print(f"Validation diagnostics: {target}")
             raise
         payload, view_payload = serialise(result), serialise(view)

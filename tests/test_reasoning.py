@@ -17,7 +17,7 @@ from scripts.evidence_collector import canonical, serialise
 from scripts.evidence_queries import KEYS, SCHEMAS
 from scripts.export_zetaris import encode_text
 from scripts.reason_evidence import artifact_paths, main, reason_bundle
-from scripts.reasoning_assessment import ASSESSMENT_SCHEMA, parse_assessment, strict_json, validate_assessment
+from scripts.reasoning_assessment import ASSESSMENT_SCHEMA, MODEL_OUTPUT_SCHEMA, parse_assessment, strict_json, validate_assessment
 from scripts.reasoning_prompts import SYSTEM_PROMPT, build_prompt
 from scripts.reasoning_providers import InferenceResponse, MockProvider, OpenAIConfig, OpenAIProvider, ProviderError
 from scripts.reasoning_view import ReasoningError, build_reasoning_view, digest
@@ -62,6 +62,11 @@ def fixture() -> dict:
 
 def valid_assessment(view: dict) -> dict:
     return strict_json(MockProvider().generate(build_prompt(view), ASSESSMENT_SCHEMA).text)
+
+
+def model_content(historical: dict) -> dict:
+    """Migrate test payloads explicitly; production never strips model fields."""
+    return {key: copy.deepcopy(historical[key]) for key in MODEL_OUTPUT_SCHEMA["properties"]}
 
 
 class ViewTests(unittest.TestCase):

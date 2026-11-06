@@ -103,6 +103,11 @@ ASSESSMENT_SCHEMA["properties"].update({"schema_version": {"type": "string", "en
                                          "assessed_hypothesis": STRING, "factual_claims": array(CLAIM)})
 ASSESSMENT_SCHEMA["required"] = list(ASSESSMENT_SCHEMA["properties"])
 
+# Historical schemas remain immutable contracts. New inference supplies only
+# interpretation; collection metadata is assembled by ARGUS, never by a model.
+MODEL_OUTPUT_SCHEMA = obj({key: deepcopy(value) for key, value in ASSESSMENT_SCHEMA["properties"].items()
+                           if key not in {"schema_version", "alert_id", "collection_status", "evidence_complete"}})
+
 
 class FactualConsistencyError(ReasoningError):
     def __init__(self, code: str, *, claim_index: int | None = None, fact_id: str | None = None) -> None:
@@ -156,7 +161,7 @@ def validate_structure(assessment: dict, *, allow_legacy: bool = False) -> None:
     _structure(assessment, schema)
 
 
-def validate_factual_claims(assessment: dict, view: dict) -> None:
+def validate_factual_claims(assessment: dict, view: dict, *, require_coverage: bool = True) -> None:
     # Recompute from admitted source records/checks, not model assertions or a
     # possibly edited fact catalog supplied by a caller.
     expected = derive_relationships(view)
@@ -176,7 +181,7 @@ def validate_factual_claims(assessment: dict, view: dict) -> None:
             raise FactualConsistencyError("FACT_VALUE_MISMATCH", claim_index=index, fact_id=safe_id)
         if sorted(map(canonical, claim["evidence"])) != sorted(map(canonical, fact["evidence"])):
             raise FactualConsistencyError("FACT_EVIDENCE_MISMATCH", claim_index=index, fact_id=safe_id)
-    if not set(expected["required_fact_ids"]) <= seen:
+    if require_coverage and not set(expected["required_fact_ids"]) <= seen:
         raise FactualConsistencyError("REQUIRED_FACT_CLAIM_MISSING")
 
 
@@ -186,6 +191,13 @@ def validate_assessment(assessment: dict, view: dict, *, allow_legacy: bool = Fa
         raise ReasoningError("Assessment alert ID does not match the evidence")
     if assessment["collection_status"] != view["collection_status"]:
         raise ReasoningError("Assessment misrepresents collection status")
+    _validate_content(assessment, view, require_gap_coverage=True)
+    if check_facts and assessment["schema_version"] == "2.0":
+        validate_factual_claims(assessment, view)
+    return assessment
+
+
+def _validate_content(assessment: dict, view: dict, *, require_gap_coverage: bool) -> None:
     if len(assessment["executive_summary"]) > 1000:
         raise ReasoningError("Assessment executive summary exceeds the limit")
     allowed = {(r["source"]["table"], r["source"]["id"], r["source"]["variant_id"]) for r in view["records"]}
@@ -209,16 +221,31 @@ def validate_assessment(assessment: dict, view: dict, *, allow_legacy: bool = Fa
         citations(alternative["evidence"])
     gap_ids = {g["gap_id"] for g in view["gaps"]}
     acknowledged = {gap for item in assessment["unknowns"] for gap in item["gap_ids"]}
-    if acknowledged != gap_ids:
+    if not acknowledged <= gap_ids or require_gap_coverage and acknowledged != gap_ids:
         raise ReasoningError("Assessment must acknowledge every supplied gap and no invented gap IDs")
     if not assessment["alternative_explanations"] or not assessment["recommended_next_steps"]:
         raise ReasoningError("Assessment requires alternatives and proposed next steps")
     has_alert = any(r["source"]["table"] == "ARGUS_SECURITY.security_alerts_compat_test" for r in view["records"])
     if not has_alert and (assessment["classification"] != "INCONCLUSIVE" or assessment["confidence"] != "LOW"):
         raise ReasoningError("An absent alert requires an inconclusive, low-confidence assessment")
-    if check_facts and assessment["schema_version"] == "2.0":
-        validate_factual_claims(assessment, view)
-    return assessment
+
+
+def validate_model_structure(content: dict) -> None:
+    _structure(content, MODEL_OUTPUT_SCHEMA)
+
+
+def validate_model_content(content: dict, view: dict, *, check_facts: bool = True) -> dict:
+    """Strict interpretation contract; ARGUS independently retains EVERY gap/fact.
+
+    Claims assert selected catalog facts, rather than copying the entire catalog.
+    Every submitted claim still receives the historical exact consistency checks.
+    Investigative unknowns may cite a subset of gaps; assembly covers all gaps.
+    """
+    validate_model_structure(content)
+    _validate_content(content, view, require_gap_coverage=False)
+    if check_facts:
+        validate_factual_claims(content, view, require_coverage=False)
+    return content
 
 
 def parse_assessment(text: str, view: dict) -> dict:

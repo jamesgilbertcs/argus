@@ -28,6 +28,22 @@ class ProviderError(ReasoningError):
     pass
 
 
+class InferenceTerminationError(ProviderError):
+    """Rejected completion, retaining only bounded, allowlisted diagnostics."""
+
+    def __init__(self, metadata: dict, *, model: str, max_output_tokens: int, response_text: str | None = None) -> None:
+        if __package__:
+            from .reasoning_diagnostics import termination_metadata
+        else:
+            from reasoning_diagnostics import termination_metadata
+        self.inference = termination_metadata(metadata)
+        self.model = model
+        self.response_text = response_text
+        self.inference.update({"requested_model": model, "actual_model": model,
+                               "output_mode": "prompt_json", "max_output_tokens": max_output_tokens})
+        super().__init__("Meterless output did not finish successfully; expected one stopped completion")
+
+
 @dataclass(frozen=True)
 class InferenceResponse:
     text: str = field(repr=False)
@@ -65,6 +81,13 @@ class MockProvider:
             "recommended_next_steps": ["Have a human analyst review the evidence and its limitations."],
             "collection_status": view["collection_status"], "evidence_complete": False,
         }
+        # Honor the supplied contract, including historical test/archive callers.
+        # New inference does not echo collection metadata or a mandatory fact list.
+        if "collection_status" not in schema.get("properties", {}):
+            for key in ("schema_version", "alert_id", "collection_status", "evidence_complete"):
+                del assessment[key]
+            assessment["factual_claims"] = []
+            assessment["unknowns"] = [{"gap_ids": [], "description": "MOCK: investigative sufficiency has not been assessed; consult ARGUS collection limitations."}]
         return InferenceResponse(json.dumps(assessment, ensure_ascii=False), "mock", "deterministic-mock-v1", True)
 
 
@@ -181,6 +204,9 @@ class OpenAIProvider:
         # Preserve operational provider metadata, without exposing raw error text,
         # private reasoning, tool payloads, or other unvalidated response content.
         metadata = {key: payload[key] for key in ("id", "usage", "service_tier") if key in payload}
+        metadata.update({"requested_model": self.config.model, "output_mode": "strict_json_schema",
+                         "finish_reason": None, "response_status": payload["status"],
+                         "max_output_tokens": self.config.max_output_tokens})
         return InferenceResponse(texts[0], "openai", payload["model"], False, metadata)
 
 
@@ -307,14 +333,20 @@ class MeterlessProvider:
                 or len(payload["choices"]) != 1 or type(payload.get("id")) is not str or not payload["id"]):
             raise ProviderError("Meterless response has an unexpected structure or model identifier")
         choice = payload["choices"][0]
-        if (type(choice) is not dict or type(choice.get("index")) is not int or choice["index"] != 0
-                or choice.get("finish_reason") != "stop"):
+        if type(choice) is not dict or type(choice.get("index")) is not int or choice["index"] != 0:
             raise ProviderError("Meterless output did not finish successfully; expected one stopped completion")
+        if choice.get("finish_reason") != "stop":
+            message = choice.get("message")
+            text = message.get("content") if type(message) is dict and message.get("role") == "assistant" else None
+            raise InferenceTerminationError({"finish_reason": choice.get("finish_reason"), "usage": payload.get("usage")},
+                                            model=self.config.model, max_output_tokens=self.config.max_output_tokens,
+                                            response_text=text if type(text) is str else None)
         message = choice.get("message")
         if (type(message) is not dict or message.get("role") != "assistant" or type(message.get("content")) is not str
                 or not message["content"].strip() or message.get("refusal") not in (None, "")
                 or message.get("tool_calls") not in (None, []) or message.get("function_call") is not None):
             raise ProviderError("Meterless returned no model output, refused, or requested unsupported actions")
         metadata = {key: payload[key] for key in ("id", "created", "usage") if key in payload}
-        metadata.update({"output_mode": self.OUTPUT_MODE, "finish_reason": "stop", "requested_model": self.config.model})
+        metadata.update({"output_mode": self.OUTPUT_MODE, "finish_reason": choice["finish_reason"],
+                         "requested_model": self.config.model, "max_output_tokens": self.config.max_output_tokens})
         return InferenceResponse(message["content"], "meterless", payload["model"], False, metadata)

@@ -105,3 +105,9 @@ for explicitly referenced authentications. Contradictory claims fail validation
 and produce credential-safe local diagnostics. This does not fact-check arbitrary
 prose or establish that an account is uncompromised. See the
 [reasoning hardening and schema migration guide](docs/reasoning_hardening.md).
+
+Phase 3B.3 separates model interpretation from deterministic final assessment
+assembly (schema 3.0). ARGUS supplies collection completeness, every limitation,
+source provenance and verified relationships; model factual assertions retain
+exact contradiction checks. Historical validators remain available. See the
+[current assessment contract and migration](docs/assessment_contract.md).

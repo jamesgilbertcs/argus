@@ -1,10 +1,10 @@
 # Phase 3B: evidence-grounded provisional reasoning
 
-Current outputs use schema **2.0**, adding deterministic evidence relationships,
-structured factual claims and staged failure diagnostics. See the
-[Phase 3B.2 migration and hardening guide](reasoning_hardening.md) for the current
-contract. The version 1.0 sections below describe the retained base fields and
-historical artifacts; new inference must use version 2.0.
+Current outputs use final schema **3.0**, separating model interpretation from
+ARGUS-generated collection metadata and deterministic relationships. See the
+[Phase 3B.3 assessment contract](assessment_contract.md) for the current schema,
+completeness policy, validation and migration. The version 1.0/2.0 sections below
+describe historical contracts and unchanged provider protocols.
 
 This phase interprets an existing Phase 3A JSON bundle. It never queries Zetaris,
 reads local operational CSVs, reads evaluation answers, executes suggested actions,

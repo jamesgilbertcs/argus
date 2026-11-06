@@ -19,7 +19,7 @@ from scripts.reasoning_assessment import ASSESSMENT_SCHEMA
 from scripts.reasoning_prompts import SYSTEM_PROMPT, build_prompt
 from scripts.reasoning_providers import MeterlessConfig, MeterlessProvider, ProviderError, _NoRedirects
 from scripts.reasoning_view import ReasoningError, build_reasoning_view
-from tests.test_reasoning import fixture, valid_assessment
+from tests.test_reasoning import fixture, model_content, valid_assessment
 
 
 TOKEN = "unit-test-runtime-secret"
@@ -106,7 +106,7 @@ class MeterlessProviderTests(unittest.TestCase):
         self.provider._opener = self.opener
 
     def response(self, **changes):
-        assessment = valid_assessment(self.view)
+        assessment = model_content(valid_assessment(self.view))
         assessment["executive_summary"] = "Unit-test response, not a live model assessment."
         return {"id": "chat_test", "object": "chat.completion", "model": MODEL, "created": 123,
                 "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": json.dumps(assessment)}}],
