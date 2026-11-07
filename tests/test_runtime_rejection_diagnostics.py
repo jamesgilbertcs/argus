@@ -102,6 +102,74 @@ class RuntimeDiagnosticTests(unittest.TestCase):
         self.assertTrue(all(v == "not_run" for v in report["validation_stages"].values()))
         opener.open.assert_called_once()
 
+    def test_unexpected_safe_root_property_is_retained_separately(self):
+        error = self.normalize("$.assessment", "property is not allowed by the schema")
+        self.assertEqual(error["path"], "$")
+        self.assertTrue(error["path_redacted"])
+        self.assertEqual(error["unexpected_property"], "assessment")
+        self.assertEqual(error["unexpected_property_status"], "retained")
+        self.assertEqual(error["expected_from_argus_schema"], {"additionalProperties": False})
+
+    def test_unexpected_nested_property_retains_verified_parent(self):
+        error = self.normalize("$.key_findings[2].extra_field2", "property is not allowed by the schema")
+        self.assertEqual(error["path"], "$.key_findings[2]")
+        self.assertEqual(error["unexpected_property"], "extra_field2")
+
+    def test_unexpected_property_length_boundary(self):
+        for size in (48, 49):
+            error = self.normalize("$." + "z" * size, "property is not allowed by the schema")
+            self.assertEqual("unexpected_property" in error, size == 48)
+
+    def test_unsafe_or_credential_shaped_property_names_stay_redacted(self):
+        for name in ("private-value", "a.b", "a[0]", "a\nvalue", "a\"value", "évidence",
+                     "sk_private", "nvapi_private", "Bearer_private", "token_private", "secret_private",
+                     "a" * 32, "", "42", "assessment." ):
+            with self.subTest(name=name):
+                error = self.normalize("$." + name, "property is not allowed by the schema")
+                self.assertNotIn("unexpected_property", error)
+                self.assertEqual(error["unexpected_property_status"], "redacted")
+
+    def test_names_not_retained_for_unknown_messages_or_invalid_parents(self):
+        for path, message in (("$.assessment", "untrusted message"),
+                              ("$.confidence.extra", "property is not allowed by the schema"),
+                              ("$.untrusted_parent.extra", "property is not allowed by the schema"),
+                              ("$.key_findings[1000].extra", "property is not allowed by the schema")):
+            with self.subTest(path=path):
+                error = self.normalize(path, message)
+                self.assertNotIn("unexpected_property", error)
+
+    def test_http_rejection_retains_safe_property_without_its_value_or_raw_message(self):
+        provider = MeterlessProvider(config())
+        opener = serve(provider, {})
+        raw = {"error": {"code": "schema_validation_failed", "message": "untrusted-message"},
+               "meterless": {"validation": {"finish_reason": "stop", "errors": [
+                   {"path": "$.assessment", "message": "property is not allowed by the schema", "actual": "private-value"}]}}}
+        opener.open.side_effect = HTTPError("http://localhost:8088/v1/chat/completions", 502, "", {}, io.BytesIO(json.dumps(raw).encode()))
+        with self.assertRaises(ReasoningFailure) as caught:
+            reason_bundle(completed_bundle(), provider)
+        report = caught.exception.report
+        error = report["inference"]["meterless"]["structured_output"]["runtime_validation"]["errors"][0]
+        self.assertEqual(error["unexpected_property"], "assessment")
+        self.assertNotIn("private-value", serialise(report))
+        self.assertNotIn("untrusted-message", serialise(report))
+        self.assertTrue(all(v == "not_run" for v in report["validation_stages"].values()))
+        opener.open.assert_called_once()
+
+    def test_reflected_configured_credential_in_property_is_never_retained(self):
+        # A short identifier can itself be a configured credential. The
+        # existing transport guard must reject it before normalization.
+        from dataclasses import replace
+        provider = MeterlessProvider(replace(config(), runtime_token="PrivateCredential"))
+        opener = serve(provider, {})
+        raw = {"error": {"code": "schema_validation_failed"}, "meterless": {"validation": {"errors": [
+            {"path": "$.PrivateCredential", "message": "property is not allowed by the schema"}]}}}
+        opener.open.side_effect = HTTPError("http://localhost:8088/v1/chat/completions", 502, "", {}, io.BytesIO(json.dumps(raw).encode()))
+        from scripts.reasoning_providers import ProviderError
+        with self.assertRaises(ProviderError) as caught:
+            reason_bundle(completed_bundle(), provider)
+        self.assertNotIn("PrivateCredential", str(caught.exception))
+        opener.open.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

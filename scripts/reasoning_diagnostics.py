@@ -18,6 +18,7 @@ MAX_SCHEMA_ERRORS = 20
 MAX_SYNTAX_SCAN_CHARS = 262_144
 FINISH_REASONS = frozenset({"stop", "length", "content_filter", "tool_calls", "function_call", "error", "cancelled"})
 MAX_RUNTIME_ERRORS = 8
+MAX_RUNTIME_PROPERTY_CHARS = 48
 
 
 def _runtime_path(path: Any, schema: dict) -> tuple[str, dict, bool]:
@@ -47,7 +48,9 @@ def _runtime_path(path: Any, schema: dict) -> tuple[str, dict, bool]:
 def runtime_schema_diagnostics(validation: Any, schema: dict = MODEL_OUTPUT_SCHEMA) -> dict:
     """Normalize the installed runtime's documented {path,message} errors.
 
-    No arbitrary messages, unexpected property names, values or body excerpts.
+    No arbitrary messages, values or body excerpts. Unexpected property names
+    are retained only as a single ASCII identifier of at most 48 characters at
+    a known object path; the untrusted full path is never copied.
     Expected constraints come from ARGUS's own schema, not untrusted error text.
     This is diagnostic-only and never changes response acceptance.
     """
@@ -79,9 +82,25 @@ def runtime_schema_diagnostics(validation: Any, schema: dict = MODEL_OUTPUT_SCHE
             expected = {"additionalProperties": False} if node.get("additionalProperties") is False else {}
         elif redacted:
             expected = {}  # The nearest known parent is not the unknown leaf.
-        errors.append({"check": code, "path": path, "path_redacted": redacted, "keyword": keyword,
-                       "expected_from_argus_schema": expected, "actual_type": actual_type,
-                       "actual_value_status": "unavailable"})
+        error = {"check": code, "path": path, "path_redacted": redacted, "keyword": keyword,
+                 "expected_from_argus_schema": expected, "actual_type": actual_type,
+                 "actual_value_status": "unavailable"}
+        if keyword == "additionalProperties":
+            # Only one unknown leaf under a verified object is admissible.
+            # Reject delimiters, escapes, Unicode, long/compound paths and
+            # credential-shaped names. Transport/CLI credential checks still
+            # apply; these names remain untrusted diagnostic labels, not facts.
+            raw_path = item.get("path")
+            suffix = raw_path[len(path) + 1:] if type(raw_path) is str and raw_path.startswith(path + ".") else ""
+            allowed = (node.get("type") == "object" and node.get("additionalProperties") is False
+                       and len(suffix) <= MAX_RUNTIME_PROPERTY_CHARS
+                       and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", suffix) is not None
+                       and not re.match(r"(?i)(?:sk_|nvapi_|ghp_|github_pat_|bearer_|token_|secret_)", suffix)
+                       and re.fullmatch(r"[A-Fa-f0-9]{20,}", suffix) is None)
+            error["unexpected_property_status"] = "retained" if allowed else "redacted"
+            if allowed:
+                error["unexpected_property"] = suffix
+        errors.append(error)
     return {"availability": "available", "errors": errors, "error_limit": MAX_RUNTIME_ERRORS,
             "reported_error_count": len(raw), "errors_truncated": len(raw) > MAX_RUNTIME_ERRORS}
 
