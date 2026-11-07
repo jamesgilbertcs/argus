@@ -120,3 +120,7 @@ Phase 3B.9 adds explicit Meterless `--meterless-output-mode json_object` for
 diagnostic inference, with the same independent schema, citation, factual and
 final-artifact checks. Strict schema output remains the default; no automatic
 fallback or repair occurs. See [JSON mode and reasoning recovery](docs/meterless_json_mode.md).
+
+Phase 3B.10 clarifies JSON-mode contract presentation with a schema-derived field
+checklist and explicit hypothesis/factual-claim guidance, while keeping every
+validation gate unchanged. See [contract presentation and live verification](docs/model_contract_presentation.md).

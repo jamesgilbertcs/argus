@@ -3,6 +3,8 @@
 Strict `json_schema` remains the default. ARGUS now also accepts an explicit
 `--meterless-output-mode json_object` selection for the existing Meterless provider.
 It changes the runtime's output-format request, **not ARGUS's acceptance rules**.
+Phase 3B.10 adds [schema-derived contract presentation](model_contract_presentation.md)
+to this explicit mode, with unchanged schemas and validation.
 There is no automatic fallback, model switch, retry, JSON repair, field coercion,
 unwrapping, inference-directed query or invented missing content.
 

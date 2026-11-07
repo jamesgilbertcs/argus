@@ -16,10 +16,12 @@ from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_ope
 
 if __package__:
     from .reasoning_assessment import strict_json
+    from .reasoning_prompts import model_contract_instructions
     from .reasoning_view import ReasoningError
     from .zetaris_client import ROOT, ZetarisError, _read_settings
 else:
     from reasoning_assessment import strict_json
+    from reasoning_prompts import model_contract_instructions
     from reasoning_view import ReasoningError
     from zetaris_client import ROOT, ZetarisError, _read_settings
 
@@ -421,7 +423,8 @@ class MeterlessProvider:
         # system message instead. This is explicit selection, never fallback.
         format_instruction = "Match the response_format JSON Schema exactly; ARGUS independently validates the result."
         if self.output_mode == "json_object":
-            format_instruction = ("Match the following ARGUS model interpretation JSON Schema exactly; "
+            format_instruction = (model_contract_instructions(schema) + "\n"
+                                  "Match the following ARGUS model interpretation JSON Schema exactly; "
                                   "ARGUS independently validates the result. JSON mode enforces syntax only.\n"
                                   + json.dumps(schema, ensure_ascii=False, separators=(",", ":")))
         instructions = (prompt[0] + "\nOutput mode: " + self.inference_output_mode + ". "

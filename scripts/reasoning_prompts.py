@@ -88,3 +88,52 @@ Give concise findings and explanations; do not return private deliberation.
 def build_prompt(view: dict) -> tuple[str, str]:
     """No evidence string is interpolated into the higher-priority instructions."""
     return SYSTEM_PROMPT, canonical({"untrusted_evidence": view})
+
+
+def _contract_shape(schema: dict) -> str:
+    """Describe structure without fabricated values or example evidence IDs."""
+    if "anyOf" in schema:
+        return " or ".join(_contract_shape(child) for child in schema["anyOf"])
+    kind = schema["type"]
+    if kind == "array":
+        return "array of " + _contract_shape(schema["items"])
+    if kind == "object":
+        return "objects with required keys [" + ", ".join(schema["required"]) + "]"
+    if "enum" in schema:
+        return kind + "; allowed values [" + ", ".join(schema["enum"]) + "]"
+    return kind
+
+
+def model_contract_instructions(schema: dict) -> str:
+    """JSON-mode field checklist from the supplied authoritative contract.
+
+    Presentation only: no schema copy, output skeleton/defaults or response edits.
+    Shared build_prompt/OpenAI/mock/strict-mode instructions remain unchanged.
+    """
+    checklist = "\n".join("- " + key + ": " + _contract_shape(schema["properties"][key])
+                          for key in schema["required"])
+    explanations = []
+    if "assessed_hypothesis" in schema["properties"]:
+        explanations.append(
+            "assessed_hypothesis: a non-empty string stating the specific security hypothesis you are evaluating. "
+            "It is the question tested by supporting evidence and counterevidence, not a declaration of compromise.")
+    if "factual_claims" in schema["properties"]:
+        explanations.append(
+            "factual_claims: an array of supported, machine-checkable assertions selected from relationships.facts. "
+            "For checkable assertions used in findings or summary, copy the selected fact_id, kind, exact value "
+            "and its complete evidence citations without changing types. Do not put finding objects into this array. "
+            "The factual_claims field is mandatory even when [] is appropriate: use [] only when no supported "
+            "checkable assertions are made in the prose. An empty array does not permit omission of the field.")
+    return (
+        "MODEL INTERPRETATION CONTRACT\n"
+        "Return exactly one JSON object with every required top-level field below, each exactly once. "
+        "No required field may be omitted or renamed. Do not wrap the object in an assessment or other container.\n"
+        + checklist + "\n" + "\n".join(explanations) + "\n"
+        "This object is model interpretation only. ARGUS assembles the final assessment after validation, "
+        "including alert ID, schema version, collection status/completeness, limitations and provenance. "
+        "Do not generate those ARGUS-owned fields.\n"
+        "Ground factual findings in supplied records. Citations must use actual records[].source table, id "
+        "and variant_id values; never invent evidence or identifiers. Exact network matches must follow "
+        "the supplied relationships, not IP similarity. Do not invent certainty: explicitly state uncertainty "
+        "and evidence gaps when information is insufficient. The full schema below remains authoritative."
+    )
