@@ -40,7 +40,7 @@ class InferenceTerminationError(ProviderError):
         self.model = model
         self.response_text = response_text
         self.inference.update({"requested_model": model, "actual_model": model,
-                               "output_mode": "strict_json_schema", "max_output_tokens": max_output_tokens})
+                               "max_output_tokens": max_output_tokens})
         super().__init__("Meterless output did not finish successfully; expected one stopped completion")
 
 
@@ -56,7 +56,8 @@ class StructuredOutputError(ProviderError):
         self.response_text = None
         self.details = {"check": code, "http_status": http_status}
         self.inference = inference_metadata(metadata, actual_model)
-        super().__init__("Meterless strict structured output failed: " + code)
+        label = "strict structured" if metadata.get("output_mode") == "strict_json_schema" else "JSON"
+        super().__init__("Meterless " + label + " output failed: " + code)
 
 
 @dataclass(frozen=True)
@@ -273,7 +274,7 @@ class MeterlessConfig:
 
 
 class MeterlessProvider:
-    """Explicit strict JSON Schema via Nightshift, plus mandatory ARGUS validation.
+    """Strict schema by default; explicit JSON mode still requires ARGUS validation.
 
     Verified small-schema route: Nightshift 1.2.7 / NVIDIA Nemotron Bolt E4B.
     Other runtimes/models must support this mode; no fallback or downgrade occurs.
@@ -285,8 +286,17 @@ class MeterlessProvider:
     STRUCTURED_ERRORS = frozenset({"structured_output_unsupported", "structured_output_schema_rejected",
                                    "invalid_json_output", "schema_validation_failed", "response_truncated", "response_refused"})
 
-    def __init__(self, config: MeterlessConfig) -> None:
+    def __init__(self, config: MeterlessConfig, *, output_mode: str = "json_schema",
+                 temperature: float | None = None) -> None:
+        if output_mode not in ("json_schema", "json_object"):
+            raise ProviderError("Meterless output mode must be json_schema or json_object")
+        if (temperature is not None and (type(temperature) not in (int, float)
+                or not 0 <= temperature <= 2 or not math.isfinite(temperature))):
+            raise ProviderError("Meterless temperature must be a finite number between 0 and 2")
         self.config = config
+        self.output_mode = output_mode
+        self.temperature = temperature
+        self.inference_output_mode = self.OUTPUT_MODE if output_mode == "json_schema" else "json_object"
         self._opener = build_opener(ProxyHandler({}), _NoRedirects())
 
     def _request_json(self, path: str, payload: dict | None = None) -> Any:
@@ -345,10 +355,12 @@ class MeterlessProvider:
 
     def _metadata(self, *, http_status: int, payload: dict | None = None) -> dict:
         metadata = {key: payload[key] for key in ("id", "created", "usage") if payload is not None and key in payload}
-        metadata.update({"output_mode": self.OUTPUT_MODE, "requested_model": self.config.model,
+        metadata.update({"output_mode": self.inference_output_mode, "requested_model": self.config.model,
                          "max_output_tokens": self.config.max_output_tokens, "http_status": http_status,
                          "meterless": {"structured_output": {"availability": "unavailable",
-                             "requested_kind": "json_schema", "requested_strict": True}}})
+                             "requested_kind": self.output_mode, "requested_strict": self.output_mode == "json_schema"}}})
+        if self.temperature is not None:
+            metadata["requested_temperature"] = self.temperature
         return metadata
 
     def _error_metadata(self, payload: dict, http_status: int, code: str) -> dict:
@@ -378,9 +390,11 @@ class MeterlessProvider:
         raw = container.get("structured_output")
         if raw is None:
             return
-        if (type(raw) is not dict or raw.get("kind") != "json_schema" or raw.get("strict") is not True
+        strict = self.output_mode == "json_schema"
+        names = (None, self.SCHEMA_NAME) if strict else (None,)
+        if (type(raw) is not dict or raw.get("kind") != self.output_mode or raw.get("strict") is not strict
                 or raw.get("validation") != "passed" or raw.get("capability") not in (None, "unverified", "verified")
-                or raw.get("name") not in (None, self.SCHEMA_NAME)
+                or raw.get("name") not in names
                 or "schema_fingerprint" in raw and (type(raw["schema_fingerprint"]) is not str
                     or re.fullmatch(r"[0-9a-f]{16}", raw["schema_fingerprint"]) is None)):
             raise StructuredOutputError("INVALID_OR_REJECTED_STRUCTURED_METADATA", model=self.config.model,
@@ -388,7 +402,7 @@ class MeterlessProvider:
         keys = {"kind", "strict", "validation", "capability", "name", "schema_fingerprint"}
         admitted = {key: raw[key] for key in sorted(keys) if key in raw}
         admitted["availability"] = "available"
-        admitted.update({"requested_kind": "json_schema", "requested_strict": True})
+        admitted.update({"requested_kind": self.output_mode, "requested_strict": strict})
         if raw.keys() - keys:
             admitted["omitted_field_count"] = len(raw.keys() - keys)
         metadata["meterless"]["structured_output"] = admitted
@@ -402,21 +416,33 @@ class MeterlessProvider:
         return tuple(row["id"] for row in payload["data"])
 
     def generate(self, prompt: tuple[str, str], schema: dict) -> InferenceResponse:
-        # The contract is the same object used by independent ARGUS validation.
-        # Do not duplicate it in the prompt or downgrade after an API rejection.
-        instructions = (prompt[0] + "\nOutput mode: strict_json_schema. "
+        # Strict mode's messages/payload remain unchanged. JSON-object mode has
+        # no schema carrier on the wire, so supply the SAME contract in the
+        # system message instead. This is explicit selection, never fallback.
+        format_instruction = "Match the response_format JSON Schema exactly; ARGUS independently validates the result."
+        if self.output_mode == "json_object":
+            format_instruction = ("Match the following ARGUS model interpretation JSON Schema exactly; "
+                                  "ARGUS independently validates the result. JSON mode enforces syntax only.\n"
+                                  + json.dumps(schema, ensure_ascii=False, separators=(",", ":")))
+        instructions = (prompt[0] + "\nOutput mode: " + self.inference_output_mode + ". "
                         "Return one JSON object only: no markdown fences or extra text. "
                         "Within each object every property name must occur exactly once; duplicate keys are rejected. "
                         "Use separate array elements for multiple findings or citations, never repeated properties. "
                         "Use only standard JSON values, without NaN or Infinity. Keep the assessment concise. "
-                        "Match the response_format JSON Schema exactly; ARGUS independently validates the result.")
-        payload = self._request_json("/chat/completions", {
+                        + format_instruction)
+        response_format = {"type": "json_schema", "json_schema": {
+            "name": self.SCHEMA_NAME, "strict": True, "schema": schema}}
+        if self.output_mode == "json_object":
+            response_format = {"type": "json_object"}
+        request_payload = {
             "model": self.config.model, "messages": [{"role": "system", "content": instructions},
                                                        {"role": "user", "content": prompt[1]}],
             "max_tokens": self.config.max_output_tokens, "stream": False,
-            "response_format": {"type": "json_schema", "json_schema": {
-                "name": self.SCHEMA_NAME, "strict": True, "schema": schema}},
-        })
+            "response_format": response_format,
+        }
+        if self.temperature is not None:
+            request_payload["temperature"] = self.temperature
+        payload = self._request_json("/chat/completions", request_payload)
         error = payload.get("error") if type(payload) is dict else None
         if type(error) is dict and type(error.get("code")) is str and error["code"] in self.STRUCTURED_ERRORS:
             raise StructuredOutputError(error["code"], model=self.config.model,

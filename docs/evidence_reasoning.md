@@ -8,6 +8,8 @@ describe historical contracts and unchanged provider protocols.
 
 Current Meterless inference uses [strict JSON Schema](meterless_strict_output.md)
 with mandatory independent validation, including the assembled final artifact.
+An explicit [JSON diagnostic mode](meterless_json_mode.md) is also available;
+it preserves the same ARGUS validation gates and never activates as a fallback.
 The prompt-only Meterless description below records the historical integration.
 
 This phase interprets an existing Phase 3A JSON bundle. It never queries Zetaris,

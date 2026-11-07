@@ -115,3 +115,8 @@ exact contradiction checks. Historical validators remain available. See the
 Phase 3B.4 integrates Meterless strict `response_format.json_schema` without
 fallback, and validates the complete assembled schema 3.0 artifact. See
 [strict-output requests, diagnostics and verification](docs/meterless_strict_output.md).
+
+Phase 3B.9 adds explicit Meterless `--meterless-output-mode json_object` for
+diagnostic inference, with the same independent schema, citation, factual and
+final-artifact checks. Strict schema output remains the default; no automatic
+fallback or repair occurs. See [JSON mode and reasoning recovery](docs/meterless_json_mode.md).

@@ -3,6 +3,9 @@
 ARGUS explicitly requests strict JSON Schema output from the existing Nightshift
 chat-completions endpoint. It never falls back to JSON mode or prompt-only JSON,
 switches models, repairs output or retries. No new Python dependency is needed.
+Strict mode remains the default. Phase 3B.9 adds a separately selected
+[JSON diagnostic mode](meterless_json_mode.md); it is never an automatic fallback
+and still requires every ARGUS acceptance check.
 
 ## Request and model contract
 

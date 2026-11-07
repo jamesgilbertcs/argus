@@ -130,9 +130,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-dir", type=Path, default=ROOT / "artifacts" / "assessments")
     parser.add_argument("--env-file", type=Path, default=ROOT / ".env.local", help="Used only by real providers")
     parser.add_argument("--max-view-bytes", type=int, default=DEFAULT_VIEW_BYTES)
+    parser.add_argument("--meterless-output-mode", choices=("json_schema", "json_object"),
+                        help="Meterless only: strict json_schema by default; explicit json_object diagnostic mode still requires every ARGUS validator")
+    parser.add_argument("--meterless-temperature", type=float,
+                        help="Meterless only: optional explicit temperature from 0 to 2; omitted by default")
     parser.add_argument("--retain-failed-response", action="store_true",
                         help="Opt in to retaining untrusted model text locally beside failure diagnostics; never printed")
     args = parser.parse_args(argv)
+    if args.provider != "meterless" and (args.meterless_output_mode is not None or args.meterless_temperature is not None):
+        parser.error("Meterless options require --provider meterless")
     try:
         with args.bundle.open("rb") as handle:
             raw = handle.read(8_388_609)
@@ -149,7 +155,8 @@ def main(argv: list[str] | None = None) -> int:
             credential = config.api_key
         elif args.provider == "meterless":
             meterless_config = MeterlessConfig.from_environment(args.env_file)
-            provider = MeterlessProvider(meterless_config)
+            provider = MeterlessProvider(meterless_config, output_mode=args.meterless_output_mode or "json_schema",
+                                         temperature=args.meterless_temperature)
             credential = meterless_config.runtime_token
         else:
             provider = MockProvider()
